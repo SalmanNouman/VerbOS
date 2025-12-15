@@ -52,3 +52,9 @@ app.on('window-all-closed', () => {
 ipcMain.handle('ping', async () => {
   return 'pong';
 });
+
+ipcMain.handle('ask-agent', async (_event, prompt: string) => {
+  // Placeholder for Phase 2: LangChain integration
+  console.log('Received prompt:', prompt);
+  return `[System]: I received your request: "${prompt}". AI Brain is not yet connected (Phase 2).`;
+});
