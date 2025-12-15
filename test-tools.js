@@ -1,6 +1,8 @@
 // Test script for Phase 3 implementation
 // Run with: node test-tools.js
 
+require('dotenv').config();
+
 const { AgentService } = require('./dist/main/AgentService');
 const path = require('path');
 const os = require('os');
@@ -18,49 +20,29 @@ async function testTools() {
     console.log('1. Testing System Info Tool:');
     console.log('---------------------------');
     
-    await new Promise((resolve) => {
-      agentService.ask('What is the system information?', (token) => {
-        process.stdout.write(token);
-        if (token.includes('Error:')) {
-          resolve();
-        }
-      });
+    await agentService.ask('What is the system information?', (token) => {
+      process.stdout.write(token);
     });
     
     console.log('\n\n2. Testing File Tool - List Directory:');
     console.log('---------------------------------------');
     
-    await new Promise((resolve) => {
-      agentService.ask(`List the contents of the directory: ${os.homedir()}`, (token) => {
-        process.stdout.write(token);
-        if (token.includes('Error:')) {
-          resolve();
-        }
-      });
+    await agentService.ask(`List the contents of the directory: ${os.homedir()}`, (token) => {
+      process.stdout.write(token);
     });
     
     console.log('\n\n3. Testing File Tool - Read File:');
     console.log('----------------------------------');
     
-    await new Promise((resolve) => {
-      agentService.ask(`Read the package.json file at: ${path.join(process.cwd(), 'package.json')}`, (token) => {
-        process.stdout.write(token);
-        if (token.includes('Error:')) {
-          resolve();
-        }
-      });
+    await agentService.ask(`Read the package.json file at: ${path.join(process.cwd(), 'package.json')}`, (token) => {
+      process.stdout.write(token);
     });
     
     console.log('\n\n4. Testing Security - Blocked Path:');
     console.log('------------------------------------');
     
-    await new Promise((resolve) => {
-      agentService.ask('List the contents of C:\\Windows', (token) => {
-        process.stdout.write(token);
-        if (token.includes('Error:') || token.includes('denied')) {
-          resolve();
-        }
-      });
+    await agentService.ask('List the contents of C:\\Windows', (token) => {
+      process.stdout.write(token);
     });
     
     console.log('\n\n✅ All tests completed!');
@@ -77,4 +59,7 @@ if (!fs.existsSync('./dist/main/AgentService.js')) {
   process.exit(1);
 }
 
-testTools();
+testTools().catch(err =>{
+  console.error('Test suite failed:', err);
+  process.exit(1);
+});
