@@ -1,0 +1,14 @@
+# Node.js
+node_modules/
+dist/
+build/
+
+# Log files
+*.log
+
+# Environment variables
+.env
+.env.local
+
+# AugOS specific ignores
+ProjectPlans/
