@@ -26,6 +26,7 @@
     "@langchain/core": "^1.1.5",
     "@langchain/google-genai": "^2.1.0",
     "@tailwindcss/typography": "^0.5.19",
+    "@types/uuid": "^10.0.0",
     "@vitejs/plugin-react": "^5.1.2",
     "autoprefixer": "^10.4.23",
     "dotenv": "^17.2.3",
@@ -41,6 +42,7 @@
     "rehype-highlight": "^7.0.2",
     "remark-gfm": "^4.0.1",
     "typescript": "^5.9.3",
+    "uuid": "^13.0.0",
     "vite": "^7.2.7",
     "zod": "^4.1.13"
   },
