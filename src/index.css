@@ -1,0 +1,19 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-cyber-black text-cyber-blue font-mono;
+  }
+}
+
+@layer components {
+  .cyber-border {
+    @apply border border-cyber-blue rounded-sm;
+  }
+  
+  .cyber-button {
+    @apply px-4 py-2 bg-cyber-gray text-cyber-green border border-cyber-green hover:bg-cyber-green hover:text-cyber-black transition-all duration-200;
+  }
+}
