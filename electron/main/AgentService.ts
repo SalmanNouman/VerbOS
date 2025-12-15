@@ -51,8 +51,9 @@ export class AgentService {
       { role: 'assistant', content: assistantMessage }
     );
     
-    // Keep only last 5 messages in recent memory
+    // Keep only the last 10 messages (5 exchanges) in recent memory
     if (memory.recentMessages.length > 10) {
+      const messagesToSummarize = memory.recentMessages.slice(-10);
       memory.recentMessages = memory.recentMessages.slice(-10);
       
       // Generate a summary when we exceed the limit
@@ -61,7 +62,7 @@ export class AgentService {
 Previous summary: ${memory.summary || 'No previous summary'}
 
 Recent messages:
-${memory.recentMessages.slice(0, -10).map(m => `${m.role}: ${m.content}`).join('\n')}`;
+${messagesToSummarize.map(m => `${m.role}: ${m.content}`).join('\n')}`;
       
       try {
         const summaryResponse = await this.model.invoke([new HumanMessage(summaryPrompt)]);

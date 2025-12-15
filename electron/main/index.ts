@@ -78,6 +78,12 @@ ipcMain.handle('ping', async () => {
 });
 
 ipcMain.handle('ask-agent', async (event, { sessionId, prompt }: { sessionId: string; prompt: string }) => {
+  if (!sessionId || !prompt) {
+    event.sender.send('agent-token', 'Error: Missing sessionId or prompt');
+    event.sender.send('stream-end');
+    return { streaming: true };
+  }
+  
   if (!agentService) {
     event.sender.send('agent-token', 'Error: AgentService not initialized');
     event.sender.send('stream-end');
