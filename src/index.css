@@ -1,19 +1,36 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   body {
-    @apply bg-cyber-black text-cyber-blue font-mono;
+    @apply bg-background text-text-primary font-sans antialiased overflow-hidden;
   }
 }
 
-@layer components {
-  .cyber-border {
-    @apply border border-cyber-blue rounded-sm;
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
   }
-  
-  .cyber-button {
-    @apply px-4 py-2 bg-cyber-gray text-cyber-green border border-cyber-green hover:bg-cyber-green hover:text-cyber-black transition-all duration-200;
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  /* Custom Scrollbar */
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  .custom-scrollbar::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    @apply bg-surfaceHighlight rounded-full border-[3px] border-solid border-background;
+  }
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    @apply bg-text-muted;
   }
 }
