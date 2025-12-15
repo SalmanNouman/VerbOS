@@ -96,7 +96,7 @@ export function ChatInterface() {
                 className={`max-w-[85%] rounded-lg p-4 shadow-sm text-sm leading-relaxed ${
                   msg.role === 'user'
                     ? 'bg-surfaceHighlight text-text-primary border border-border'
-                    : 'bg-transparent text-text-secondary pl-0 border-l-2 border-primary/50 rounded-none'
+                    : 'bg-transparent text-text-secondary pl-2 border-l-2 border-primary/50 rounded-none'
                 }`}
               >
                 {msg.role === 'assistant' && (
