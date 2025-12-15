@@ -1,11 +1,15 @@
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
+import { StructuredToolInterface } from "@langchain/core/tools";
 import { HumanMessage, SystemMessage, AIMessage, ToolMessage } from "@langchain/core/messages";
 import { FileTool } from "./tools/FileTool";
 import { SystemTool } from "./tools/SystemTool";
+import { homedir } from 'os';
+import { join } from 'path';
 
 export class AgentService {
   private model: ChatGoogleGenerativeAI;
-  private tools: any[];
+  private tools: StructuredToolInterface[];
+  private modelWithTools: ReturnType<typeof this.model.bindTools>;
 
   constructor() {
     this.model = new ChatGoogleGenerativeAI({
@@ -15,22 +19,20 @@ export class AgentService {
 
     // Initialize tools
     this.tools = [...FileTool.getTools(), ...SystemTool.getTools()];
+    this.modelWithTools = this.model.bindTools(this.tools);
   }
 
   async ask(prompt: string, onToken: (token: string) => void): Promise<void> {
     try {
-      // Bind tools to the model
-      const modelWithTools = this.model.bindTools(this.tools);
-
       const messages: any[] = [
         new SystemMessage(
           "You are AugOS, a helpful AI assistant with access to file system and system information tools. " +
           "Use tools when necessary to answer questions about files, directories, or system information. " +
           "Always provide clear and concise responses.\n\n" +
           `IMPORTANT: You are running on ${process.platform === 'win32' ? 'Windows' : process.platform}. ` +
-          `The user's home directory is: ${require('os').homedir()}. ` +
+          `The user's home directory is: ${homedir()}. ` +
           `When accessing user folders like Downloads, Documents, Desktop, use the correct path format for this OS. ` +
-          `For example, Downloads folder is at: ${require('path').join(require('os').homedir(), 'Downloads')}`
+          `For example, Downloads folder is at: ${join(homedir(), 'Downloads')}`
         ),
         new HumanMessage(prompt),
       ];
@@ -46,7 +48,7 @@ export class AgentService {
         iterations++;
 
         // Call the model
-        const response = await modelWithTools.invoke(messages);
+        const response = await this.modelWithTools.invoke(messages);
         messages.push(response);
 
         // Check if there are tool calls
@@ -74,6 +76,12 @@ export class AgentService {
                   content: `Error: ${errorMsg}`,
                 }));
               }
+            } else {
+              onToken(`Error: Tool ${toolCall.name} not found\n`);
+              messages.push(new ToolMessage({
+                tool_call_id: toolCall.id || "",
+                content: `Error: Tool ${toolCall.name} not found`,
+              }));
             }
           }
         } else {

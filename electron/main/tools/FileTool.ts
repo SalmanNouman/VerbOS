@@ -18,9 +18,7 @@ export class FileTool {
     }),
     func: async ({ path }) => {
       try {
-        console.log('[FileTool] list_directory called with path:', path);
         const validatedPath = await validateDirectoryPath(path);
-        console.log('[FileTool] validated path:', validatedPath);
         const items = await fs.readdir(validatedPath, { withFileTypes: true });
         
         const result = await Promise.all(items.map(async item => ({
@@ -44,7 +42,7 @@ export class FileTool {
     description: 'Read the contents of a text file. Returns the file content as a string.',
     schema: z.object({
       path: z.string().describe('The absolute path of the file to read'),
-      encoding: z.string().optional().default('utf-8').describe('File encoding (default: utf-8)'),
+      encoding: z.enum(['utf-8', 'utf8', 'ascii', 'binary', 'base64', 'hex', 'latin1', 'ucs2', 'utf16le']).optional().default('utf-8').describe('File encoding (default: utf-8)'),
     }),
     func: async ({ path, encoding }) => {
       try {
