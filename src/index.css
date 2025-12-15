@@ -19,18 +19,67 @@
     scrollbar-width: none;
   }
 
-  /* Custom Scrollbar */
+  /* Custom scrollbar */
   .custom-scrollbar::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
+    width: 6px;
   }
   .custom-scrollbar::-webkit-scrollbar-track {
-    @apply bg-transparent;
+    background: transparent;
   }
   .custom-scrollbar::-webkit-scrollbar-thumb {
-    @apply bg-surfaceHighlight rounded-full border-[3px] border-solid border-background;
+    background: #27272a;
+    border-radius: 3px;
   }
   .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    @apply bg-text-muted;
+    background: #3f3f46;
+  }
+
+  /* Markdown prose styles for dark theme */
+  .prose {
+    color: #a1a1aa;
+  }
+
+  .prose h1,
+  .prose h2,
+  .prose h3,
+  .prose h4,
+  .prose h5,
+  .prose h6 {
+    color: #e4e4e7;
+  }
+
+  .prose strong {
+    color: #e4e4e7;
+  }
+
+  .prose code:not(:where([class~="not-prose"] *)) {
+    background-color: #27272a;
+    color: #e4e4e7;
+    padding: 0.125rem 0.375rem;
+    border-radius: 0.25rem;
+    font-size: 0.875em;
+  }
+
+  .prose pre {
+    background-color: #18181b;
+    border: 1px solid #27272a;
+  }
+
+  .prose blockquote {
+    border-left-color: #3b82f6;
+    color: #d4d4d8;
+  }
+
+  .prose a {
+    color: #60a5fa;
+  }
+
+  .prose a:hover {
+    color: #93c5fd;
+  }
+
+  .prose ul > li::marker,
+  .prose ol > li::marker {
+    color: #71717a;
   }
 }
