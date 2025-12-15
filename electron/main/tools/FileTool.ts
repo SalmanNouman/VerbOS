@@ -71,13 +71,14 @@ export class FileTool {
     schema: z.object({
       path: z.string().describe('The absolute path of the file to write'),
       content: z.string().describe('The content to write to the file'),
-      encoding: z.string().optional().default('utf-8').describe('File encoding (default: utf-8)'),
+      encoding: z.enum(['utf-8', 'utf8', 'ascii', 'binary', 'base64', 'hex', 'latin1', 'ucs2', 'utf16le']).optional().default('utf-8').describe('File encoding (default: utf-8)'),
     }),
     func: async ({ path, content, encoding }) => {
       try {
+        const bufferEncoding = Buffer.byteLength(content, encoding as BufferEncoding);
         // Check content size limit
-        if (Buffer.byteLength(content, encoding as BufferEncoding) > MAX_WRITE_SIZE) {
-          return `Error: Content too large (${Math.round(Buffer.byteLength(content, encoding as BufferEncoding) / 1024)}KB). Maximum allowed size is ${MAX_WRITE_SIZE / 1024}KB.`;
+        if (bufferEncoding > MAX_WRITE_SIZE) {
+          return `Error: Content too large (${Math.round(bufferEncoding / 1024)}KB). Maximum allowed size is ${MAX_WRITE_SIZE / 1024}KB.`;
         }
         
         const validatedPath = await validateWritePath(path);
