@@ -4,7 +4,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 // the ipcRenderer without exposing the entire object
 contextBridge.exposeInMainWorld('augos', {
   ping: () => ipcRenderer.invoke('ping'),
-  askAgent: (prompt: string) => ipcRenderer.invoke('ask-agent', prompt),
+  askAgent: (sessionId: string, prompt: string) => ipcRenderer.invoke('ask-agent', { sessionId, prompt }),
   onToken: (callback: (token: string) => void) => {
     ipcRenderer.on('agent-token', (_event, token: string) => callback(token));
   },

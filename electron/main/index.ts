@@ -77,7 +77,13 @@ ipcMain.handle('ping', async () => {
   return 'pong';
 });
 
-ipcMain.handle('ask-agent', async (event, prompt: string) => {
+ipcMain.handle('ask-agent', async (event, { sessionId, prompt }: { sessionId: string; prompt: string }) => {
+  if (!sessionId || !prompt) {
+    event.sender.send('agent-token', 'Error: Missing sessionId or prompt');
+    event.sender.send('stream-end');
+    return { streaming: true };
+  }
+  
   if (!agentService) {
     event.sender.send('agent-token', 'Error: AgentService not initialized');
     event.sender.send('stream-end');
@@ -85,7 +91,7 @@ ipcMain.handle('ask-agent', async (event, prompt: string) => {
   }
   
   // Start streaming response
-  await agentService.ask(prompt, (token: string) => {
+  await agentService.ask(sessionId, prompt, (token: string) => {
     event.sender.send('agent-token', token);
   });
   
@@ -121,5 +127,12 @@ ipcMain.handle('history:save', async (_event, session: ChatSession) => {
 
 ipcMain.handle('history:delete', async (_event, id: string) => {
   if (!storageService) throw new Error('StorageService not initialized');
-  return storageService.deleteSession(id);
+  const result = await storageService.deleteSession(id);
+  
+  // Clear the session from AgentService memory
+  if (agentService) {
+    agentService.clearSession(id);
+  }
+  
+  return result;
 });

@@ -5,11 +5,18 @@ import { FileTool } from "./tools/FileTool";
 import { SystemTool } from "./tools/SystemTool";
 import { homedir } from 'os';
 import { join } from 'path';
+import type { ChatSession, Message } from '../../src/types/augos';
+
+interface SessionMemory {
+  summary: string;
+  recentMessages: Message[];
+}
 
 export class AgentService {
   private model: ChatGoogleGenerativeAI;
   private tools: StructuredToolInterface[];
   private modelWithTools: ReturnType<typeof this.model.bindTools>;
+  private sessions: Map<string, SessionMemory>;
 
   constructor() {
     this.model = new ChatGoogleGenerativeAI({
@@ -20,10 +27,71 @@ export class AgentService {
     // Initialize tools
     this.tools = [...FileTool.getTools(), ...SystemTool.getTools()];
     this.modelWithTools = this.model.bindTools(this.tools);
+    
+    // Initialize sessions map
+    this.sessions = new Map();
   }
 
-  async ask(prompt: string, onToken: (token: string) => void): Promise<void> {
+  private getMemory(sessionId: string): SessionMemory {
+    if (!this.sessions.has(sessionId)) {
+      this.sessions.set(sessionId, {
+        summary: '',
+        recentMessages: []
+      });
+    }
+    return this.sessions.get(sessionId)!;
+  }
+
+  private async updateMemory(sessionId: string, userMessage: string, assistantMessage: string): Promise<void> {
+    const memory = this.getMemory(sessionId);
+    
+    // Add new messages to recent messages
+    memory.recentMessages.push(
+      { role: 'user', content: userMessage },
+      { role: 'assistant', content: assistantMessage }
+    );
+    
+    // Keep only the last 10 messages (5 exchanges) in recent memory
+    if (memory.recentMessages.length > 10) {
+      const messagesToSummarize = memory.recentMessages.slice(-10);
+      memory.recentMessages = memory.recentMessages.slice(-10);
+      
+      // Generate a summary when we exceed the limit
+      const summaryPrompt = `Summarize this conversation history in a concise paragraph:
+
+Previous summary: ${memory.summary || 'No previous summary'}
+
+Recent messages:
+${messagesToSummarize.map(m => `${m.role}: ${m.content}`).join('\n')}`;
+      
+      try {
+        const summaryResponse = await this.model.invoke([new HumanMessage(summaryPrompt)]);
+        memory.summary = summaryResponse.content as string;
+      } catch (error) {
+        console.error('Failed to generate summary:', error);
+      }
+    }
+  }
+
+  clearSession(sessionId: string): void {
+    this.sessions.delete(sessionId);
+  }
+
+  async ask(sessionId: string, prompt: string, onToken: (token: string) => void): Promise<void> {
     try {
+      const memory = this.getMemory(sessionId);
+      
+      // Build conversation history
+      let conversationHistory = '';
+      if (memory.summary) {
+        conversationHistory += `Previous conversation summary: ${memory.summary}\n\n`;
+      }
+      if (memory.recentMessages.length > 0) {
+        conversationHistory += 'Recent messages:\n';
+        conversationHistory += memory.recentMessages.map(m => `${m.role}: ${m.content}`).join('\n');
+        conversationHistory += '\n\n';
+      }
+      
       const messages: any[] = [
         new SystemMessage(
           "You are AugOS, a helpful AI assistant with access to file system and system information tools. " +
@@ -32,7 +100,8 @@ export class AgentService {
           `IMPORTANT: You are running on ${process.platform === 'win32' ? 'Windows' : process.platform}. ` +
           `The user's home directory is: ${homedir()}. ` +
           `When accessing user folders like Downloads, Documents, Desktop, use the correct path format for this OS. ` +
-          `For example, Downloads folder is at: ${join(homedir(), 'Downloads')}`
+          `For example, Downloads folder is at: ${join(homedir(), 'Downloads')}\n\n` +
+          `Conversation History:\n${conversationHistory}`
         ),
         new HumanMessage(prompt),
       ];
@@ -87,9 +156,15 @@ export class AgentService {
         } else {
           // No more tool calls, stream the final response
           onToken("\n");
+          let finalResponse = "";
           if (typeof response.content === "string") {
+            finalResponse = response.content;
             onToken(response.content);
           }
+          
+          // Save the conversation to memory
+          await this.updateMemory(sessionId, prompt, finalResponse);
+          
           break;
         }
       }
