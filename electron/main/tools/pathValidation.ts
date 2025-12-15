@@ -128,30 +128,27 @@ export async function validateDirectoryPath(path: string): Promise<string> {
  * Validates a path for file writing operations
  */
 export async function validateWritePath(path: string): Promise<string> {
-  // First validate the path as normal
-  const validatedPath = await validatePath(path);
-  
-  // Check if parent directory exists and is accessible
-  const parentDir = resolve(validatedPath, '..');
+  // Resolve to an absolute path using the same rules as validatePath,
+  // but do not require the file itself to exist.
+  let absolutePath = resolve(path);
+  if (!path.includes(':') && !path.startsWith('/') && !path.startsWith('\\')) {
+    absolutePath = resolve(homedir(), path);
+  }
+
+  // Validate the parent directory (must exist, be a directory, and be within allowed roots).
+  const parentDir = resolve(absolutePath, '..');
+  await validateDirectoryPath(parentDir);
+
+  // If the target file already exists, resolve its real path and fully validate it
+  // to defend against symlink attacks.
   try {
-    const parentStats = await fs.stat(parentDir);
-    if (!parentStats.isDirectory()) {
-      throw new Error(`Cannot write file: Parent path is not a directory: ${parentDir}`);
-    }
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('no such file')) {
-      throw new Error(`Cannot write file: Parent directory does not exist: ${parentDir}`);
+    const fileRealPath = await realpath(absolutePath);
+    return await validatePath(fileRealPath);
+  } catch (error: any) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      // New file: parent has been validated, so this path is safe to use.
+      return absolutePath;
     }
     throw error;
-  }
-  
-  // Additional check: if file exists, resolve its real path to prevent symlink attacks
-  try {
-    const fileRealPath = await realpath(validatedPath);
-    // Re-validate the real path
-    return await validatePath(fileRealPath);
-  } catch {
-    // File doesn't exist, return the validated path
-    return validatedPath;
   }
 }

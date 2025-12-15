@@ -1,10 +1,11 @@
 import { DynamicStructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
-import { platform, arch, release, homedir, tmpdir, totalmem, freemem, cpus, networkInterfaces } from 'os';
+import { platform, arch, release, hostname, homedir, tmpdir, totalmem, freemem, cpus, networkInterfaces } from 'os';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 
 const execAsync = promisify(exec);
+const netInterfaces = networkInterfaces();
 
 /**
  * SystemTool provides system information to the agent
@@ -20,7 +21,7 @@ export class SystemTool {
           platform: platform(),
           arch: arch(),
           os_release: release(),
-          hostname: require('os').hostname(),
+          hostname: hostname(),
           home_directory: homedir(),
           temp_directory: tmpdir(),
           memory: {
@@ -32,8 +33,8 @@ export class SystemTool {
             cores: cpus().length,
           },
           network: {
-            interfaces: Object.keys(networkInterfaces()).filter(iface => 
-              networkInterfaces()[iface]?.some(addr => !addr.internal)
+            interfaces: Object.keys(netInterfaces).filter(iface => 
+              netInterfaces[iface]?.some(addr => !addr.internal)
             ),
           },
         };
