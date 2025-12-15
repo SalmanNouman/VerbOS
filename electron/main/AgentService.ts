@@ -1,30 +1,101 @@
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
-import { HumanMessage, SystemMessage } from "@langchain/core/messages";
+import { StructuredToolInterface } from "@langchain/core/tools";
+import { HumanMessage, SystemMessage, AIMessage, ToolMessage } from "@langchain/core/messages";
+import { FileTool } from "./tools/FileTool";
+import { SystemTool } from "./tools/SystemTool";
+import { homedir } from 'os';
+import { join } from 'path';
 
 export class AgentService {
   private model: ChatGoogleGenerativeAI;
+  private tools: StructuredToolInterface[];
+  private modelWithTools: ReturnType<typeof this.model.bindTools>;
 
   constructor() {
     this.model = new ChatGoogleGenerativeAI({
       model: "gemini-2.0-flash",
       apiKey: process.env.GOOGLE_API_KEY,
     });
+
+    // Initialize tools
+    this.tools = [...FileTool.getTools(), ...SystemTool.getTools()];
+    this.modelWithTools = this.model.bindTools(this.tools);
   }
 
   async ask(prompt: string, onToken: (token: string) => void): Promise<void> {
     try {
-      const messages = [
-        new SystemMessage("You are AugOS, a helpful AI assistant. Provide clear, concise, and accurate responses."),
+      const messages: any[] = [
+        new SystemMessage(
+          "You are AugOS, a helpful AI assistant with access to file system and system information tools. " +
+          "Use tools when necessary to answer questions about files, directories, or system information. " +
+          "Always provide clear and concise responses.\n\n" +
+          `IMPORTANT: You are running on ${process.platform === 'win32' ? 'Windows' : process.platform}. ` +
+          `The user's home directory is: ${homedir()}. ` +
+          `When accessing user folders like Downloads, Documents, Desktop, use the correct path format for this OS. ` +
+          `For example, Downloads folder is at: ${join(homedir(), 'Downloads')}`
+        ),
         new HumanMessage(prompt),
       ];
 
-      const stream = await this.model.stream(messages);
+      // Send initial status
+      onToken("Thinking...\n");
 
-      for await (const chunk of stream) {
-        const token = chunk.content as string;
-        if (token) {
-          onToken(token);
+      // Agentic loop - keep calling until no more tool calls
+      let iterations = 0;
+      const maxIterations = 10;
+
+      while (iterations < maxIterations) {
+        iterations++;
+
+        // Call the model
+        const response = await this.modelWithTools.invoke(messages);
+        messages.push(response);
+
+        // Check if there are tool calls
+        if (response.tool_calls && response.tool_calls.length > 0) {
+          for (const toolCall of response.tool_calls) {
+            onToken(`\nUsing tool: ${toolCall.name}...`);
+
+            // Find and execute the tool
+            const tool = this.tools.find(t => t.name === toolCall.name);
+            if (tool) {
+              try {
+                const result = await tool.invoke(toolCall.args);
+                onToken(" Done\n");
+
+                // Add tool result to messages
+                messages.push(new ToolMessage({
+                  tool_call_id: toolCall.id || "",
+                  content: result,
+                }));
+              } catch (error) {
+                const errorMsg = error instanceof Error ? error.message : "Unknown error";
+                onToken(` Error: ${errorMsg}\n`);
+                messages.push(new ToolMessage({
+                  tool_call_id: toolCall.id || "",
+                  content: `Error: ${errorMsg}`,
+                }));
+              }
+            } else {
+              onToken(`Error: Tool ${toolCall.name} not found\n`);
+              messages.push(new ToolMessage({
+                tool_call_id: toolCall.id || "",
+                content: `Error: Tool ${toolCall.name} not found`,
+              }));
+            }
+          }
+        } else {
+          // No more tool calls, stream the final response
+          onToken("\n");
+          if (typeof response.content === "string") {
+            onToken(response.content);
+          }
+          break;
         }
+      }
+
+      if (iterations >= maxIterations) {
+        onToken("\n\nReached maximum iterations. Please try a simpler request.");
       }
     } catch (error) {
       console.error("Error in AgentService.ask:", error);
