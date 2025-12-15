@@ -36,40 +36,54 @@ export function ChatInterface() {
     setInput('');
     setIsLoading(true);
 
+    // Create an empty assistant message that will be filled with streaming tokens
+    const assistantMsgId = (Date.now() + 1).toString();
+    const assistantMsg: Message = {
+      id: assistantMsgId,
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now(),
+    };
+    setMessages(prev => [...prev, assistantMsg]);
+
     try {
       if (window.augos && window.augos.askAgent) {
-        const response = await window.augos.askAgent(userMsg.content);
-        
-        const assistantMsg: Message = {
-          id: (Date.now() + 1).toString(),
-          role: 'assistant',
-          content: response,
-          timestamp: Date.now(),
-        };
-        setMessages(prev => [...prev, assistantMsg]);
+        // Set up token listener before asking
+        window.augos.onToken((token: string) => {
+          setMessages(prev => prev.map(msg => 
+            msg.id === assistantMsgId 
+              ? { ...msg, content: msg.content + token }
+              : msg
+          ));
+        });
+
+        // Set up stream end listener
+        window.augos?.onStreamEnd(() => {
+          setIsLoading(false);
+          window.augos?.removeTokenListener();
+          window.augos?.removeStreamEndListener();
+        });
+
+        await window.augos.askAgent(userMsg.content);
       } else {
         // Fallback for dev/browser environment
         // Simulating a delay for more realistic feel
         setTimeout(() => {
-          const assistantMsg: Message = {
-            id: (Date.now() + 1).toString(),
-            role: 'assistant',
-            content: `I received your command: "${userMsg.content}". \n\nThis is a simulation response. Connect to the AugOS backend for full functionality.`,
-            timestamp: Date.now(),
-          };
-          setMessages(prev => [...prev, assistantMsg]);
+          setMessages(prev => prev.map(msg => 
+            msg.id === assistantMsgId 
+              ? { ...msg, content: `I received your command: "${userMsg.content}". \n\nThis is a simulation response. Connect to the AugOS backend for full functionality.` }
+              : msg
+          ));
+          setIsLoading(false);
         }, 800);
       }
     } catch (error) {
       console.error('Agent error:', error);
-      const errorMsg: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: `Error: Failed to contact agent. Please check the connection.`,
-        timestamp: Date.now(),
-      };
-      setMessages(prev => [...prev, errorMsg]);
-    } finally {
+      setMessages(prev => prev.map(msg => 
+        msg.id === assistantMsgId 
+          ? { ...msg, content: `Error: Failed to contact agent. Please check the connection.` }
+          : msg
+      ));
       setIsLoading(false);
     }
   };
@@ -110,13 +124,13 @@ export function ChatInterface() {
             </div>
           ))}
           
-          {isLoading && (
+          {isLoading && messages[messages.length - 1]?.role === 'assistant' && messages[messages.length - 1]?.content === '' && (
             <div className="flex justify-start animate-in fade-in duration-300">
                <div className="bg-transparent pl-0 border-l-2 border-primary/50 p-4 rounded-none">
                   <div className="flex items-center gap-2 mb-2 text-xs font-semibold text-primary uppercase tracking-wider opacity-80">
                      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="animate-spin"><path d="M12 2v4"/><path d="m16.2 7.8 2.9-2.9"/><path d="M18 12h4"/><path d="m16.2 16.2 2.9 2.9"/><path d="M12 18v4"/><path d="m7.8 16.2-2.9 2.9"/><path d="M6 12H2"/><path d="m7.8 7.8-2.9-2.9"/></svg>
                      <span>Thinking</span>
-                   </div>
+                  </div>
                   <div className="h-4 w-24 bg-surfaceHighlight/50 rounded animate-pulse"></div>
                </div>
             </div>
