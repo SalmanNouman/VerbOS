@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import { join } from 'path';
 import { AgentService } from './AgentService';
+import { StorageService, ChatSession } from './storage';
 import dotenv from 'dotenv';
 
 // Load environment variables with explicit path
@@ -13,6 +14,7 @@ const isDev = process.env.NODE_ENV === 'development';
 
 // AgentService will be initialized later
 let agentService: AgentService | null = null;
+let storageService: StorageService | null = null;
 
 function createWindow(): void {
   // Create the browser window
@@ -48,11 +50,12 @@ app.whenReady().then(() => {
   try {
     // Initialize AgentService after app is ready
     agentService = new AgentService();
-    console.log('AgentService initialized successfully');
+    storageService = new StorageService();
+    console.log('AgentService and StorageService initialized successfully');
     
     createWindow();
   } catch (error) {
-    console.error('Failed to initialize AgentService:', error);
+    console.error('Failed to initialize services:', error);
     app.quit();
   }
 
@@ -91,4 +94,32 @@ ipcMain.handle('ask-agent', async (event, prompt: string) => {
   
   // Return to confirm completion
   return { streaming: true };
+});
+
+// History handlers
+ipcMain.handle('history:create', async (_event, title?: string) => {
+  if (!storageService) throw new Error('StorageService not initialized');
+  const session = storageService.createSession(title);
+  return session;
+});
+
+ipcMain.handle('history:list', async () => {
+  if (!storageService) throw new Error('StorageService not initialized');
+  return storageService.getAllSessions();
+});
+
+ipcMain.handle('history:load', async (_event, id: string) => {
+  if (!storageService) throw new Error('StorageService not initialized');
+  return storageService.getSession(id);
+});
+
+ipcMain.handle('history:save', async (_event, session: ChatSession) => {
+  if (!storageService) throw new Error('StorageService not initialized');
+  storageService.saveSession(session);
+  return true;
+});
+
+ipcMain.handle('history:delete', async (_event, id: string) => {
+  if (!storageService) throw new Error('StorageService not initialized');
+  return storageService.deleteSession(id);
 });

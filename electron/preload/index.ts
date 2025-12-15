@@ -17,4 +17,11 @@ contextBridge.exposeInMainWorld('augos', {
   removeStreamEndListener: () => {
     ipcRenderer.removeAllListeners('stream-end');
   },
+  history: {
+    create: (title?: string) => ipcRenderer.invoke('history:create', title),
+    list: () => ipcRenderer.invoke('history:list'),
+    load: (id: string) => ipcRenderer.invoke('history:load', id),
+    save: (session: any) => ipcRenderer.invoke('history:save', session),
+    delete: (id: string) => ipcRenderer.invoke('history:delete', id),
+  },
 });
