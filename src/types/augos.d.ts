@@ -27,7 +27,7 @@ export interface HistoryAPI {
 
 export interface AugOSAPI {
   ping(): Promise<string>;
-  askAgent(prompt: string): Promise<{ streaming: boolean }>;
+  askAgent(sessionId: string, prompt: string): Promise<{ streaming: boolean }>;
   onToken(callback: (token: string) => void): void;
   onStreamEnd(callback: () => void): void;
   removeTokenListener(): void;

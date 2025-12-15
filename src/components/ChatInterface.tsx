@@ -90,7 +90,7 @@ export function ChatInterface({ currentSession, onSaveSession }: ChatInterfacePr
           });
         });
 
-        await window.augos.askAgent(userMsg.content);
+        await window.augos.askAgent(currentSession.id, userMsg.content);
       } else {
         setTimeout(async () => {
           const finalMessages = messagesWithAssistant.map((msg, i) =>
