@@ -3,15 +3,14 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import type { ChatSession, Message } from '../types/augos';
 
-interface Message {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  timestamp: number;
+interface ChatInterfaceProps {
+  currentSession: ChatSession | null;
+  onSaveSession: (session: ChatSession) => Promise<void>;
 }
 
-export function ChatInterface() {
+export function ChatInterface({ currentSession, onSaveSession }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -25,70 +24,103 @@ export function ChatInterface() {
     scrollToBottom();
   }, [messages]);
 
+  useEffect(() => {
+    if (currentSession) {
+      setMessages(currentSession.messages);
+    } else {
+      setMessages([]);
+    }
+  }, [currentSession]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim() || isLoading) return;
+    if (!input.trim() || isLoading || !currentSession) return;
 
     const userMsg: Message = {
-      id: Date.now().toString(),
       role: 'user',
       content: input,
-      timestamp: Date.now(),
     };
 
-    setMessages(prev => [...prev, userMsg]);
+    const newMessages = [...messages, userMsg];
+    setMessages(newMessages);
     setInput('');
     setIsLoading(true);
 
-    // Create an empty assistant message that will be filled with streaming tokens
-    const assistantMsgId = (Date.now() + 1).toString();
+    if (messages.length === 0) {
+      await onSaveSession({
+        ...currentSession,
+        title: input.slice(0, 50) + (input.length > 50 ? '...' : ''),
+        messages: newMessages,
+        updatedAt: Date.now(),
+      });
+    }
+
     const assistantMsg: Message = {
-      id: assistantMsgId,
       role: 'assistant',
       content: '',
-      timestamp: Date.now(),
     };
-    setMessages(prev => [...prev, assistantMsg]);
+    const messagesWithAssistant = [...newMessages, assistantMsg];
+    setMessages(messagesWithAssistant);
 
     try {
       if (window.augos && window.augos.askAgent) {
-        // Set up token listener before asking
         window.augos.onToken((token: string) => {
-          setMessages(prev => prev.map(msg =>
-            msg.id === assistantMsgId
-              ? { ...msg, content: msg.content + token }
-              : msg
-          ));
+          setMessages(prev => {
+            const updated = [...prev];
+            const lastMsg = updated[updated.length - 1];
+            if (lastMsg && lastMsg.role === 'assistant') {
+              updated[updated.length - 1] = { ...lastMsg, content: lastMsg.content + token };
+            }
+            return updated;
+          });
         });
 
-        // Set up stream end listener
-        window.augos?.onStreamEnd(() => {
+        window.augos?.onStreamEnd(async () => {
           setIsLoading(false);
           window.augos?.removeTokenListener();
           window.augos?.removeStreamEndListener();
+
+          setMessages(prev => {
+            onSaveSession({
+              ...currentSession,
+              messages: prev,
+              updatedAt: Date.now(),
+            });
+            return prev;
+          });
         });
 
         await window.augos.askAgent(userMsg.content);
       } else {
-        // Fallback for dev/browser environment
-        // Simulating a delay for more realistic feel
-        setTimeout(() => {
-          setMessages(prev => prev.map(msg =>
-            msg.id === assistantMsgId
-              ? { ...msg, content: `I received your command: "${userMsg.content}". \n\nThis is a simulation response. Connect to the AugOS backend for full functionality.` }
+        setTimeout(async () => {
+          const finalMessages = messagesWithAssistant.map((msg, i) =>
+            i === messagesWithAssistant.length - 1
+              ? { ...msg, content: `I received: "${userMsg.content}". Connect to AugOS backend for full functionality.` }
               : msg
-          ));
+          );
+          setMessages(finalMessages);
           setIsLoading(false);
+          await onSaveSession({
+            ...currentSession,
+            messages: finalMessages,
+            updatedAt: Date.now(),
+          });
         }, 800);
       }
     } catch (error) {
       console.error('Agent error:', error);
-      setMessages(prev => prev.map(msg =>
-        msg.id === assistantMsgId
-          ? { ...msg, content: `Error: Failed to contact agent. Please check the connection.` }
+      const errorMessages = messagesWithAssistant.map((msg, i) =>
+        i === messagesWithAssistant.length - 1
+          ? { ...msg, content: `Error: Failed to contact agent.` }
           : msg
-      ));
+      );
+      setMessages(errorMessages);
       setIsLoading(false);
+      await onSaveSession({
+        ...currentSession,
+        messages: errorMessages,
+        updatedAt: Date.now(),
+      });
     }
   };
 
@@ -105,15 +137,15 @@ export function ChatInterface() {
             </div>
           )}
 
-          {messages.map((msg) => (
+          {messages.map((msg, index) => (
             <div
-              key={msg.id}
+              key={index}
               className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2 duration-300`}
             >
               <div
                 className={`max-w-[85%] rounded-lg p-4 shadow-sm text-sm leading-relaxed ${msg.role === 'user'
-                    ? 'bg-surfaceHighlight text-text-primary border border-border'
-                    : 'bg-transparent text-text-secondary pl-2 border-l-2 border-primary/50 rounded-none'
+                  ? 'bg-surfaceHighlight text-text-primary border border-border'
+                  : 'bg-transparent text-text-secondary pl-2 border-l-2 border-primary/50 rounded-none'
                   }`}
               >
                 {msg.role === 'assistant' && (
