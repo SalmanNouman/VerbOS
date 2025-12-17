@@ -10,5 +10,5 @@ build/
 .env
 .env.local
 
-# AugOS specific ignores
+# VerbOS specific ignores
 ProjectPlans/

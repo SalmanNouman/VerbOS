@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { ChatInterface } from './components/ChatInterface';
-import type { ChatSession, ChatSummary } from './types/augos';
+import type { ChatSession, ChatSummary } from './types/verbos';
 import './index.css';
 
 function App() {
@@ -13,8 +13,8 @@ function App() {
   useEffect(() => {
     const checkConnection = async () => {
       try {
-        if (window.augos) {
-          await window.augos.ping();
+        if (window.verbos) {
+          await window.verbos.ping();
           setIsConnected(true);
         }
       } catch (err) {
@@ -26,9 +26,9 @@ function App() {
   }, []);
 
   const loadHistory = useCallback(async () => {
-    if (!window.augos) return;
+    if (!window.verbos) return;
     try {
-      const history = await window.augos.history.list();
+      const history = await window.verbos.history.list();
       setChatHistory(history);
     } catch (err) {
       console.error('Failed to load history:', err);
@@ -37,16 +37,16 @@ function App() {
 
   useEffect(() => {
     const initSession = async () => {
-      if (!window.augos || !isConnected) return;
+      if (!window.verbos || !isConnected) return;
 
       await loadHistory();
 
-      const history = await window.augos.history.list();
+      const history = await window.verbos.history.list();
       if (history.length > 0) {
-        const session = await window.augos.history.load(history[0].id);
+        const session = await window.verbos.history.load(history[0].id);
         if (session) setCurrentSession(session);
       } else {
-        const session = await window.augos.history.create();
+        const session = await window.verbos.history.create();
         setCurrentSession(session);
       }
     };
@@ -54,9 +54,9 @@ function App() {
   }, [isConnected, loadHistory]);
 
   const createNewChat = async () => {
-    if (!window.augos) return;
+    if (!window.verbos) return;
     try {
-      const session = await window.augos.history.create();
+      const session = await window.verbos.history.create();
       setCurrentSession(session);
       await loadHistory();
       setShowHistory(false);
@@ -66,9 +66,9 @@ function App() {
   };
 
   const loadChat = async (id: string) => {
-    if (!window.augos) return;
+    if (!window.verbos) return;
     try {
-      const session = await window.augos.history.load(id);
+      const session = await window.verbos.history.load(id);
       if (session) {
         setCurrentSession(session);
         setShowHistory(false);
@@ -79,9 +79,9 @@ function App() {
   };
 
   const saveSession = async (session: ChatSession) => {
-    if (!window.augos) return;
+    if (!window.verbos) return;
     try {
-      await window.augos.history.save(session);
+      await window.verbos.history.save(session);
       setCurrentSession(session);
       await loadHistory();
     } catch (err) {
@@ -90,9 +90,9 @@ function App() {
   };
 
   const deleteChat = async (id: string) => {
-    if (!window.augos) return;
+    if (!window.verbos) return;
     try {
-      await window.augos.history.delete(id);
+      await window.verbos.history.delete(id);
       if (currentSession?.id === id) {
         await createNewChat();
       }
@@ -186,7 +186,7 @@ function App() {
         {/* Header */}
         <header className="h-10 border-b border-border flex items-center justify-between px-4 bg-background/50 backdrop-blur-sm sticky top-0 z-10">
           <div className="flex items-center gap-3 text-sm">
-            <span className="font-semibold tracking-wide text-text-primary">AugOS</span>
+            <span className="font-semibold tracking-wide text-text-primary">VerbOS</span>
             <span className="text-text-muted">/</span>
             <span className="text-text-secondary">workspace</span>
           </div>
