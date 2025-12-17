@@ -25,7 +25,7 @@ export class StorageService {
   private readonly filePath: string;
 
   constructor() {
-    this.filePath = `${app.getPath('userData')}/augos-history.json`;
+    this.filePath = `${app.getPath('userData')}/verbos-history.json`;
   }
 
   private ensureFile(): void {

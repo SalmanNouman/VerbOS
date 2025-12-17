@@ -3,7 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import type { ChatSession, Message } from '../types/augos';
+import type { ChatSession, Message } from '../types/verbos';
 
 interface ChatInterfaceProps {
   currentSession: ChatSession | null;
@@ -63,8 +63,8 @@ export function ChatInterface({ currentSession, onSaveSession }: ChatInterfacePr
     setMessages(messagesWithAssistant);
 
     try {
-      if (window.augos && window.augos.askAgent) {
-        window.augos.onToken((token: string) => {
+      if (window.verbos && window.verbos.askAgent) {
+        window.verbos.onToken((token: string) => {
           setMessages(prev => {
             const updated = [...prev];
             const lastMsg = updated[updated.length - 1];
@@ -75,10 +75,10 @@ export function ChatInterface({ currentSession, onSaveSession }: ChatInterfacePr
           });
         });
 
-        window.augos?.onStreamEnd(async () => {
+        window.verbos?.onStreamEnd(async () => {
           setIsLoading(false);
-          window.augos?.removeTokenListener();
-          window.augos?.removeStreamEndListener();
+          window.verbos?.removeTokenListener();
+          window.verbos?.removeStreamEndListener();
 
           setMessages(prev => {
             onSaveSession({
@@ -90,12 +90,12 @@ export function ChatInterface({ currentSession, onSaveSession }: ChatInterfacePr
           });
         });
 
-        await window.augos.askAgent(currentSession.id, userMsg.content);
+        await window.verbos.askAgent(currentSession.id, userMsg.content);
       } else {
         setTimeout(async () => {
           const finalMessages = messagesWithAssistant.map((msg, i) =>
             i === messagesWithAssistant.length - 1
-              ? { ...msg, content: `I received: "${userMsg.content}". Connect to AugOS backend for full functionality.` }
+              ? { ...msg, content: `I received: "${userMsg.content}". Connect to VerbOS backend for full functionality.` }
               : msg
           );
           setMessages(finalMessages);
@@ -132,7 +132,7 @@ export function ChatInterface({ currentSession, onSaveSession }: ChatInterfacePr
           {messages.length === 0 && (
             <div className="flex flex-col items-center justify-center h-[60vh] text-text-muted opacity-50 select-none">
               <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" className="mb-4"><path d="M12 2a10 10 0 1 0 10 10 4 4 0 0 1-5-5 4 4 0 0 1-5-5c0-2 2-2 2-2" /></svg>
-              <p className="text-sm font-medium">AugOS Agent Ready</p>
+              <p className="text-sm font-medium">VerbOS Agent Ready</p>
               <p className="text-xs mt-1">Type a command to begin...</p>
             </div>
           )}
@@ -216,7 +216,7 @@ export function ChatInterface({ currentSession, onSaveSession }: ChatInterfacePr
                 type="text"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                placeholder="Ask AugOS..."
+                placeholder="Ask VerbOS..."
                 className="flex-1 bg-transparent text-text-primary p-3 focus:outline-none font-sans placeholder:text-text-muted/50"
                 autoFocus
               />

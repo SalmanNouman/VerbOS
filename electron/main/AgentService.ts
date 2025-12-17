@@ -5,7 +5,7 @@ import { FileTool } from "./tools/FileTool";
 import { SystemTool } from "./tools/SystemTool";
 import { homedir } from 'os';
 import { join } from 'path';
-import type { ChatSession, Message } from '../../src/types/augos';
+import type { ChatSession, Message } from '../../src/types/verbos';
 
 interface SessionMemory {
   summary: string;
@@ -94,7 +94,7 @@ ${messagesToSummarize.map(m => `${m.role}: ${m.content}`).join('\n')}`;
       
       const messages: any[] = [
         new SystemMessage(
-          "You are AugOS, a helpful AI assistant with access to file system and system information tools. " +
+          "You are VerbOS, a helpful AI assistant with access to file system and system information tools. " +
           "Use tools when necessary to answer questions about files, directories, or system information. " +
           "Always provide clear and concise responses.\n\n" +
           `IMPORTANT: You are running on ${process.platform === 'win32' ? 'Windows' : process.platform}. ` +

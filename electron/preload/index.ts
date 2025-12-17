@@ -2,7 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 
 // Expose protected methods that allow the renderer process to use
 // the ipcRenderer without exposing the entire object
-contextBridge.exposeInMainWorld('augos', {
+contextBridge.exposeInMainWorld('verbos', {
   ping: () => ipcRenderer.invoke('ping'),
   askAgent: (sessionId: string, prompt: string) => ipcRenderer.invoke('ask-agent', { sessionId, prompt }),
   onToken: (callback: (token: string) => void) => {

@@ -8,7 +8,7 @@ const path = require('path');
 const os = require('os');
 
 async function testTools() {
-  console.log('Testing Phase 3 AugOS Tools Implementation...\n');
+  console.log('Testing Phase 3 VerbOS Tools Implementation...\n');
   
   try {
     // Initialize AgentService

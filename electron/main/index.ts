@@ -7,7 +7,7 @@ import dotenv from 'dotenv';
 // Load environment variables with explicit path
 dotenv.config({ path: join(__dirname, '../../.env') });
 
-console.log('Starting AugOS main process...');
+console.log('Starting VerbOS main process...');
 console.log('API Key exists:', !!process.env.GOOGLE_API_KEY);
 
 const isDev = process.env.NODE_ENV === 'development';

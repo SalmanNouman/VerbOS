@@ -25,7 +25,7 @@ export interface HistoryAPI {
   delete(id: string): Promise<boolean>;
 }
 
-export interface AugOSAPI {
+export interface VerbOSAPI {
   ping(): Promise<string>;
   askAgent(sessionId: string, prompt: string): Promise<{ streaming: boolean }>;
   onToken(callback: (token: string) => void): void;
@@ -37,6 +37,6 @@ export interface AugOSAPI {
 
 declare global {
   interface Window {
-    augos?: AugOSAPI;
+    verbos?: VerbOSAPI;
   }
 }

@@ -1,6 +1,6 @@
 {
-  appId: 'com.augos.app',
-  productName: 'AugOS',
+  appId: 'com.verbos.app',
+  productName: 'VerbOS',
   directories: {
     output: 'release',
   },
