@@ -1,35 +1,55 @@
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
+import { ChatOllama } from "@langchain/ollama";
 import { StructuredToolInterface } from "@langchain/core/tools";
-import { HumanMessage, SystemMessage, AIMessage, ToolMessage } from "@langchain/core/messages";
+import { HumanMessage, SystemMessage, AIMessage, ToolMessage, BaseMessage } from "@langchain/core/messages";
 import { FileTool } from "./tools/FileTool";
 import { SystemTool } from "./tools/SystemTool";
 import { homedir } from 'os';
 import { join } from 'path';
-import type { ChatSession, Message } from '../../src/types/verbos';
+import type { Message } from '../../src/types/verbos';
 
 interface SessionMemory {
   summary: string;
   recentMessages: Message[];
 }
 
-export class AgentService {
-  private model: ChatGoogleGenerativeAI;
-  private tools: StructuredToolInterface[];
-  private modelWithTools: ReturnType<typeof this.model.bindTools>;
-  private sessions: Map<string, SessionMemory>;
+interface SmartContextConfig {
+  maxRecentMessages: number;
+  localModelName: string;
+  ollamaBaseUrl: string;
+}
 
-  constructor() {
-    this.model = new ChatGoogleGenerativeAI({
+const DEFAULT_CONFIG: SmartContextConfig = {
+  maxRecentMessages: 10,
+  localModelName: "llama3.2",
+  ollamaBaseUrl: "http://localhost:11434",
+};
+
+export class AgentService {
+  private chatModel: ChatGoogleGenerativeAI;
+  private summaryModel: ChatOllama;
+  private tools: StructuredToolInterface[];
+  private modelWithTools: ReturnType<typeof this.chatModel.bindTools>;
+  private sessions: Map<string, SessionMemory> = new Map();
+  private config: SmartContextConfig;
+
+  constructor(config: Partial<SmartContextConfig> = {}) {
+    this.config = { ...DEFAULT_CONFIG, ...config };
+
+    this.chatModel = new ChatGoogleGenerativeAI({
       model: "gemini-2.0-flash",
       apiKey: process.env.GOOGLE_API_KEY,
     });
 
-    // Initialize tools
+    this.summaryModel = new ChatOllama({
+      model: this.config.localModelName,
+      baseUrl: this.config.ollamaBaseUrl,
+    });
+
     this.tools = [...FileTool.getTools(), ...SystemTool.getTools()];
-    this.modelWithTools = this.model.bindTools(this.tools);
-    
-    // Initialize sessions map
-    this.sessions = new Map();
+    this.modelWithTools = this.chatModel.bindTools(this.tools);
+
+    console.log(`[AgentService] Initialized (Chat: Gemini, Summary: Ollama ${this.config.localModelName})`);
   }
 
   private getMemory(sessionId: string): SessionMemory {
@@ -42,97 +62,105 @@ export class AgentService {
     return this.sessions.get(sessionId)!;
   }
 
+  /**
+   * Summarizes history locally using Ollama to maintain privacy before context reaches the cloud.
+   */
   private async updateMemory(sessionId: string, userMessage: string, assistantMessage: string): Promise<void> {
     const memory = this.getMemory(sessionId);
-    
-    // Add new messages to recent messages
+
     memory.recentMessages.push(
       { role: 'user', content: userMessage },
       { role: 'assistant', content: assistantMessage }
     );
-    
-    // Keep only the last 10 messages (5 exchanges) in recent memory
-    if (memory.recentMessages.length > 10) {
-      const messagesToSummarize = memory.recentMessages.slice(-10);
-      memory.recentMessages = memory.recentMessages.slice(-10);
-      
-      // Generate a summary when we exceed the limit
-      const summaryPrompt = `Summarize this conversation history in a concise paragraph:
 
-Previous summary: ${memory.summary || 'No previous summary'}
+    if (memory.recentMessages.length > this.config.maxRecentMessages) {
+      const messagesToSummarize = memory.recentMessages.slice(0, memory.recentMessages.length - this.config.maxRecentMessages);
+      memory.recentMessages = memory.recentMessages.slice(-this.config.maxRecentMessages);
 
-Recent messages:
-${messagesToSummarize.map(m => `${m.role}: ${m.content}`).join('\n')}`;
-      
+      const summaryPrompt = `Summarize the following conversation history concisely, preserving key facts and user state. 
+Be factual. Do not repeat the history verbatim.
+
+Previous summary: ${memory.summary || 'None'}
+
+New messages:
+${messagesToSummarize.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n')}
+
+Concise summary:`;
+
       try {
-        const summaryResponse = await this.model.invoke([new HumanMessage(summaryPrompt)]);
-        memory.summary = summaryResponse.content as string;
+        const summaryResponse = await this.summaryModel.invoke([new HumanMessage(summaryPrompt)]);
+        memory.summary = typeof summaryResponse.content === 'string'
+          ? summaryResponse.content
+          : JSON.stringify(summaryResponse.content);
       } catch (error) {
-        console.error('Failed to generate summary:', error);
+        console.error('[AgentService] Local summarization failed. Using aggressive truncation for privacy.');
+        // Fallback: Aggressive truncation to avoid leaking raw text to the cloud in the next request
+        const fallbackSummary = messagesToSummarize
+          .map(m => `[${m.role.toUpperCase()}: ${m.content.substring(0, 30)}...]`)
+          .join(' ');
+        memory.summary = memory.summary
+          ? `${memory.summary} (Partially summarized: ${fallbackSummary})`
+          : fallbackSummary;
       }
     }
   }
 
   clearSession(sessionId: string): void {
     this.sessions.delete(sessionId);
+    console.log(`[AgentService] Session ${sessionId} cleared.`);
+  }
+
+  private buildSystemInstructions(memory: SessionMemory): string {
+    let historySection = '';
+    if (memory.summary) {
+      historySection += `CONVERSATION SUMMARY (Local Context):\n${memory.summary}\n\n`;
+    }
+    if (memory.recentMessages.length > 0) {
+      historySection += 'RECENT MESSAGES:\n';
+      historySection += memory.recentMessages.map(m => `${m.role}: ${m.content}`).join('\n');
+      historySection += '\n\n';
+    }
+
+    return (
+      "You are VerbOS, a secure AI assistant with deep OS integration via provided tools.\n" +
+      "Use tools for any file system or system information requests.\n" +
+      "Always provide precise, professional, and actionable responses.\n\n" +
+      `ENVIRONMENT:\n` +
+      `- OS: ${process.platform === 'win32' ? 'Windows' : process.platform}\n` +
+      `- User Home: ${homedir()}\n` +
+      `- Important Paths: Downloads at ${join(homedir(), 'Downloads')}, Documents at ${join(homedir(), 'Documents')}\n\n` +
+      historySection
+    );
   }
 
   async ask(sessionId: string, prompt: string, onToken: (token: string) => void): Promise<void> {
     try {
       const memory = this.getMemory(sessionId);
-      
-      // Build conversation history
-      let conversationHistory = '';
-      if (memory.summary) {
-        conversationHistory += `Previous conversation summary: ${memory.summary}\n\n`;
-      }
-      if (memory.recentMessages.length > 0) {
-        conversationHistory += 'Recent messages:\n';
-        conversationHistory += memory.recentMessages.map(m => `${m.role}: ${m.content}`).join('\n');
-        conversationHistory += '\n\n';
-      }
-      
-      const messages: any[] = [
-        new SystemMessage(
-          "You are VerbOS, a helpful AI assistant with access to file system and system information tools. " +
-          "Use tools when necessary to answer questions about files, directories, or system information. " +
-          "Always provide clear and concise responses.\n\n" +
-          `IMPORTANT: You are running on ${process.platform === 'win32' ? 'Windows' : process.platform}. ` +
-          `The user's home directory is: ${homedir()}. ` +
-          `When accessing user folders like Downloads, Documents, Desktop, use the correct path format for this OS. ` +
-          `For example, Downloads folder is at: ${join(homedir(), 'Downloads')}\n\n` +
-          `Conversation History:\n${conversationHistory}`
-        ),
+      const messages: BaseMessage[] = [
+        new SystemMessage(this.buildSystemInstructions(memory)),
         new HumanMessage(prompt),
       ];
 
-      // Send initial status
       onToken("Thinking...\n");
 
-      // Agentic loop - keep calling until no more tool calls
       let iterations = 0;
-      const maxIterations = 10;
+      const maxIterations = 8;
 
       while (iterations < maxIterations) {
         iterations++;
 
-        // Call the model
         const response = await this.modelWithTools.invoke(messages);
         messages.push(response);
 
-        // Check if there are tool calls
         if (response.tool_calls && response.tool_calls.length > 0) {
           for (const toolCall of response.tool_calls) {
             onToken(`\nUsing tool: ${toolCall.name}...`);
 
-            // Find and execute the tool
             const tool = this.tools.find(t => t.name === toolCall.name);
             if (tool) {
               try {
                 const result = await tool.invoke(toolCall.args);
                 onToken(" Done\n");
-
-                // Add tool result to messages
                 messages.push(new ToolMessage({
                   tool_call_id: toolCall.id || "",
                   content: result,
@@ -146,35 +174,30 @@ ${messagesToSummarize.map(m => `${m.role}: ${m.content}`).join('\n')}`;
                 }));
               }
             } else {
-              onToken(`Error: Tool ${toolCall.name} not found\n`);
+              const errorMsg = `Tool ${toolCall.name} not found`;
+              onToken(` Error: ${errorMsg}\n`);
               messages.push(new ToolMessage({
                 tool_call_id: toolCall.id || "",
-                content: `Error: Tool ${toolCall.name} not found`,
+                content: `Error: ${errorMsg}`,
               }));
             }
           }
         } else {
-          // No more tool calls, stream the final response
           onToken("\n");
-          let finalResponse = "";
-          if (typeof response.content === "string") {
-            finalResponse = response.content;
-            onToken(response.content);
-          }
-          
-          // Save the conversation to memory
+          const finalResponse = typeof response.content === "string" ? response.content : "";
+          onToken(finalResponse);
+
           await this.updateMemory(sessionId, prompt, finalResponse);
-          
           break;
         }
       }
 
       if (iterations >= maxIterations) {
-        onToken("\n\nReached maximum iterations. Please try a simpler request.");
+        onToken("\n\nAgent logic reached session threshold. Please refine your request.");
       }
     } catch (error) {
-      console.error("Error in AgentService.ask:", error);
-      onToken("\n\nError: Failed to get response from AI. Please check your API key and try again.");
+      console.error("AgentService.ask Error:", error);
+      onToken("\n\nCommunication failure. Ensure your API keys and local Ollama instance are active.");
     }
   }
 }

@@ -1,7 +1,8 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import { join } from 'path';
 import { AgentService } from './AgentService';
-import { StorageService, ChatSession } from './storage';
+import { StorageService } from './storage';
+import type { ChatSession } from '../../src/types/verbos';
 import dotenv from 'dotenv';
 
 // Load environment variables with explicit path
@@ -52,7 +53,7 @@ app.whenReady().then(() => {
     agentService = new AgentService();
     storageService = new StorageService();
     console.log('AgentService and StorageService initialized successfully');
-    
+
     createWindow();
   } catch (error) {
     console.error('Failed to initialize services:', error);
@@ -83,21 +84,21 @@ ipcMain.handle('ask-agent', async (event, { sessionId, prompt }: { sessionId: st
     event.sender.send('stream-end');
     return { streaming: true };
   }
-  
+
   if (!agentService) {
     event.sender.send('agent-token', 'Error: AgentService not initialized');
     event.sender.send('stream-end');
     return { streaming: true };
   }
-  
+
   // Start streaming response
   await agentService.ask(sessionId, prompt, (token: string) => {
     event.sender.send('agent-token', token);
   });
-  
+
   // Send stream-end event when done
   event.sender.send('stream-end');
-  
+
   // Return to confirm completion
   return { streaming: true };
 });
@@ -128,11 +129,11 @@ ipcMain.handle('history:save', async (_event, session: ChatSession) => {
 ipcMain.handle('history:delete', async (_event, id: string) => {
   if (!storageService) throw new Error('StorageService not initialized');
   const result = await storageService.deleteSession(id);
-  
+
   // Clear the session from AgentService memory
   if (agentService) {
     agentService.clearSession(id);
   }
-  
+
   return result;
 });

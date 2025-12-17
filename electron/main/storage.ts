@@ -1,25 +1,7 @@
 import { app } from 'electron';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { v4 as uuidv4 } from 'uuid';
-
-export interface Message {
-  role: 'user' | 'assistant';
-  content: string;
-}
-
-export interface ChatSession {
-  id: string;
-  title: string;
-  messages: Message[];
-  createdAt: number;
-  updatedAt: number;
-}
-
-export interface ChatSummary {
-  id: string;
-  title: string;
-  date: string;
-}
+import type { Message, ChatSession, ChatSummary } from '../../src/types/verbos';
 
 export class StorageService {
   private readonly filePath: string;
@@ -58,7 +40,7 @@ export class StorageService {
   getAllSessions(): ChatSummary[] {
     const data = this.readData();
     const sessions = Object.values(data.sessions);
-    
+
     return sessions
       .sort((a, b) => b.updatedAt - a.updatedAt)
       .map(session => ({
