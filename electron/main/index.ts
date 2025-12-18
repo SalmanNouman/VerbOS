@@ -73,6 +73,10 @@ app.on('window-all-closed', () => {
   }
 });
 
+app.on('will-quit', () => {
+  storageService?.close();
+});
+
 // IPC handlers
 ipcMain.handle('ping', async () => {
   return 'pong';
@@ -122,8 +126,13 @@ ipcMain.handle('history:load', async (_event, id: string) => {
 
 ipcMain.handle('history:updateTitle', async (_event, sessionId: string, title: string) => {
   if (!storageService) throw new Error('StorageService not initialized');
-  storageService.updateTitle(sessionId, title);
-  return true;
+  if (typeof sessionId !== 'string' || !sessionId) {
+    throw new Error('Invalid sessionId: must be a non-empty string');
+  }
+  if (typeof title !== 'string' || !title) {
+    throw new Error('Invalid title: must be a non-empty string');
+  }
+  return storageService.updateTitle(sessionId, title);
 });
 
 ipcMain.handle('history:delete', async (_event, id: string) => {

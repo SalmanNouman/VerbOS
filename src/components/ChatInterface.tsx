@@ -49,7 +49,9 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
     // Update title on first message
     if (messages.length === 0) {
       const newTitle = input.slice(0, 50) + (input.length > 50 ? '...' : '');
-      await onUpdateTitle(currentSession.id, newTitle);
+      onUpdateTitle(currentSession.id, newTitle).catch(err => {
+        console.error('Failed to update title:', err);
+      });
     }
 
     const assistantMsg: Message = {

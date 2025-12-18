@@ -12,6 +12,7 @@ export class StorageService {
     console.log(`[StorageService] Initializing database at: ${dbPath}`);
 
     this.db = new Database(dbPath);
+    this.db.pragma('foreign_keys = ON');
     this.db.pragma('journal_mode = WAL'); // Write-Ahead Logging for performance
     this.initializeTables();
     this.migrateFromJSON();
@@ -61,14 +62,18 @@ export class StorageService {
               VALUES (?, ?, ?, ?, ?)
             `).run(session.id, session.title, '', session.createdAt, session.updatedAt);
 
-            // Insert messages
+            // Insert messages with per-message timestamps to preserve order
             const insertMsg = this.db.prepare(`
               INSERT INTO messages (session_id, role, content, timestamp)
               VALUES (?, ?, ?, ?)
             `);
 
-            for (const msg of session.messages) {
-              insertMsg.run(session.id, msg.role, msg.content, session.updatedAt);
+            const baseTimestamp = session.createdAt || session.updatedAt;
+            for (let i = 0; i < session.messages.length; i++) {
+              const msg = session.messages[i];
+              // Use message's own timestamp if available, otherwise derive from index
+              const msgTimestamp = (msg as any).timestamp || (msg as any).createdAt || (baseTimestamp + i);
+              insertMsg.run(session.id, msg.role, msg.content, msgTimestamp);
             }
           }
 
@@ -105,15 +110,18 @@ export class StorageService {
 
   addMessage(sessionId: string, role: 'user' | 'assistant', content: string): void {
     const now = Date.now();
-
-    this.db.prepare(`
+    const insert = this.db.prepare(`
       INSERT INTO messages (session_id, role, content, timestamp)
       VALUES (?, ?, ?, ?)
-    `).run(sessionId, role, content, now);
-
-    this.db.prepare(`
+      `);
+    const update = this.db.prepare(`
       UPDATE sessions SET updated_at = ? WHERE id = ?
-    `).run(now, sessionId);
+      `);
+
+    this.db.transaction(() => {
+      insert.run(sessionId, role, content, now);
+      update.run(now, sessionId);
+    })();
   }
 
   updateSummary(sessionId: string, summary: string): void {
@@ -190,10 +198,11 @@ export class StorageService {
     return result.changes > 0;
   }
 
-  updateTitle(sessionId: string, title: string): void {
-    this.db.prepare(`
+  updateTitle(sessionId: string, title: string): boolean {
+    const result = this.db.prepare(`
       UPDATE sessions SET title = ? WHERE id = ?
     `).run(title, sessionId);
+    return result.changes > 0;
   }
 
   close(): void {

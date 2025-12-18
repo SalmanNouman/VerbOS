@@ -83,6 +83,9 @@ function App() {
     try {
       await window.verbos.history.updateTitle(sessionId, title);
       await loadHistory();
+      if (currentSession?.id === sessionId) {
+        setCurrentSession( prev => prev ? { ...prev, title } : null);
+      }
     } catch (err) {
       console.error('Failed to update title:', err);
     }

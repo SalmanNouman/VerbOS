@@ -65,11 +65,7 @@ export class AgentService {
         return; // Not enough messages to warrant summarization
       }
 
-      // Calculate how many messages need to be summarized
-      const recentMessages = this.storage.getRecentMessages(sessionId, this.config.maxRecentMessages);
       const allMessages = session.messages;
-
-      // Messages to summarize = all messages minus the recent ones we keep
       const messagesToSummarize = allMessages.slice(0, allMessages.length - this.config.maxRecentMessages);
 
       if (messagesToSummarize.length === 0) {
@@ -205,13 +201,11 @@ Concise summary:`;
         const fallbackMsg = "\n\nAgent logic reached session threshold. Please refine your request.";
         onToken(fallbackMsg);
         assistantResponse = fallbackMsg;
-        this.storage.addMessage(sessionId, 'assistant', assistantResponse);
       }
     } catch (error) {
       console.error("AgentService.ask Error:", error);
       const errorMsg = "\n\nCommunication failure. Ensure your API keys and local Ollama instance are active.";
       onToken(errorMsg);
-      this.storage.addMessage(sessionId, 'assistant', errorMsg);
     }
   }
 }
