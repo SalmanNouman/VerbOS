@@ -7,10 +7,10 @@ import type { ChatSession, Message } from '../types/verbos';
 
 interface ChatInterfaceProps {
   currentSession: ChatSession | null;
-  onSaveSession: (session: ChatSession) => Promise<void>;
+  onUpdateTitle: (sessionId: string, title: string) => Promise<void>;
 }
 
-export function ChatInterface({ currentSession, onSaveSession }: ChatInterfaceProps) {
+export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -46,13 +46,10 @@ export function ChatInterface({ currentSession, onSaveSession }: ChatInterfacePr
     setInput('');
     setIsLoading(true);
 
+    // Update title on first message
     if (messages.length === 0) {
-      await onSaveSession({
-        ...currentSession,
-        title: input.slice(0, 50) + (input.length > 50 ? '...' : ''),
-        messages: newMessages,
-        updatedAt: Date.now(),
-      });
+      const newTitle = input.slice(0, 50) + (input.length > 50 ? '...' : '');
+      await onUpdateTitle(currentSession.id, newTitle);
     }
 
     const assistantMsg: Message = {
@@ -79,15 +76,7 @@ export function ChatInterface({ currentSession, onSaveSession }: ChatInterfacePr
           setIsLoading(false);
           window.verbos?.removeTokenListener();
           window.verbos?.removeStreamEndListener();
-
-          setMessages(prev => {
-            onSaveSession({
-              ...currentSession,
-              messages: prev,
-              updatedAt: Date.now(),
-            });
-            return prev;
-          });
+          // Messages are auto-saved by AgentService
         });
 
         await window.verbos.askAgent(currentSession.id, userMsg.content);
@@ -100,11 +89,7 @@ export function ChatInterface({ currentSession, onSaveSession }: ChatInterfacePr
           );
           setMessages(finalMessages);
           setIsLoading(false);
-          await onSaveSession({
-            ...currentSession,
-            messages: finalMessages,
-            updatedAt: Date.now(),
-          });
+          // In fallback mode (no backend), messages aren't persisted
         }, 800);
       }
     } catch (error) {
@@ -116,11 +101,7 @@ export function ChatInterface({ currentSession, onSaveSession }: ChatInterfacePr
       );
       setMessages(errorMessages);
       setIsLoading(false);
-      await onSaveSession({
-        ...currentSession,
-        messages: errorMessages,
-        updatedAt: Date.now(),
-      });
+      // Error messages are auto-saved by AgentService
     }
   };
 

@@ -21,7 +21,7 @@ contextBridge.exposeInMainWorld('verbos', {
     create: (title?: string) => ipcRenderer.invoke('history:create', title),
     list: () => ipcRenderer.invoke('history:list'),
     load: (id: string) => ipcRenderer.invoke('history:load', id),
-    save: (session: any) => ipcRenderer.invoke('history:save', session),
+    updateTitle: (sessionId: string, title: string) => ipcRenderer.invoke('history:updateTitle', sessionId, title),
     delete: (id: string) => ipcRenderer.invoke('history:delete', id),
   },
 });

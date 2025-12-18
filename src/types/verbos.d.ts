@@ -21,7 +21,7 @@ export interface HistoryAPI {
   create(title?: string): Promise<ChatSession>;
   list(): Promise<ChatSummary[]>;
   load(id: string): Promise<ChatSession | null>;
-  save(session: ChatSession): Promise<boolean>;
+  updateTitle(sessionId: string, title: string): Promise<boolean>;
   delete(id: string): Promise<boolean>;
 }
 

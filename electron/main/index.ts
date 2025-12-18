@@ -47,11 +47,11 @@ function createWindow(): void {
 
 // App event listeners
 app.whenReady().then(() => {
-  console.log('App is ready, initializing AgentService...');
+  console.log('App is ready, initializing services...');
   try {
-    // Initialize AgentService after app is ready
-    agentService = new AgentService();
+    // Initialize StorageService first (AgentService depends on it)
     storageService = new StorageService();
+    agentService = new AgentService(storageService);
     console.log('AgentService and StorageService initialized successfully');
 
     createWindow();
@@ -120,20 +120,13 @@ ipcMain.handle('history:load', async (_event, id: string) => {
   return storageService.getSession(id);
 });
 
-ipcMain.handle('history:save', async (_event, session: ChatSession) => {
+ipcMain.handle('history:updateTitle', async (_event, sessionId: string, title: string) => {
   if (!storageService) throw new Error('StorageService not initialized');
-  storageService.saveSession(session);
+  storageService.updateTitle(sessionId, title);
   return true;
 });
 
 ipcMain.handle('history:delete', async (_event, id: string) => {
   if (!storageService) throw new Error('StorageService not initialized');
-  const result = await storageService.deleteSession(id);
-
-  // Clear the session from AgentService memory
-  if (agentService) {
-    agentService.clearSession(id);
-  }
-
-  return result;
+  return storageService.deleteSession(id);
 });
