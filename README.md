@@ -89,17 +89,22 @@ A local LLM (Ollama) acts as a privacy mediator. It sanitizes context and summar
 
 ### Running the App
 
+- **Building Project:**
+  ```bash
+  npm run build
+  npm run build:electron
+  ```
+  - **Run Ollama instance:**
+  ```bash
+  ollama run llama3.2
+  ```
+  
 - **Development Mode:**
   ```bash
   npm run dev
   ```
   This starts the Vite development server and launches the Electron application simultaneously.
-
-- **Production Build:**
-  ```bash
-  npm run build
-  ```
-
+  
 - **Packaging:**
   ```bash
   npm run dist
