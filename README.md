@@ -1,4 +1,5 @@
 # VerbOS
+<img width="1182" height="736" alt="Screenshot 2025-12-18 190912" src="https://github.com/user-attachments/assets/77bab5d2-b5fc-489e-970c-dcc3184e8a57" />
 
 > **A Universal Agent for your Computer.**
 
