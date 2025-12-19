@@ -11,7 +11,8 @@
     "build:vite": "vite build",
     "build:electron": "tsc -p electron/tsconfig.json",
     "pack": "npm run build && electron-builder",
-    "dist": "npm run build && electron-builder --publish=never"
+    "dist": "npm run build && electron-builder --publish=never",
+    "postinstall": "electron-rebuild"
   },
   "keywords": [
     "electron",
@@ -29,6 +30,7 @@
     "@tailwindcss/typography": "^0.5.19",
     "@vitejs/plugin-react": "^5.1.2",
     "autoprefixer": "^10.4.23",
+    "better-sqlite3": "^12.5.0",
     "dotenv": "^17.2.3",
     "electron": "^39.2.7",
     "electron-builder": "^26.0.12",
@@ -47,6 +49,8 @@
     "zod": "^4.1.13"
   },
   "devDependencies": {
+    "@electron/rebuild": "^4.0.1",
+    "@types/better-sqlite3": "^7.6.13",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@types/react-syntax-highlighter": "^15.5.13",

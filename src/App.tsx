@@ -78,14 +78,16 @@ function App() {
     }
   };
 
-  const saveSession = async (session: ChatSession) => {
+  const updateTitle = async (sessionId: string, title: string) => {
     if (!window.verbos) return;
     try {
-      await window.verbos.history.save(session);
-      setCurrentSession(session);
+      await window.verbos.history.updateTitle(sessionId, title);
       await loadHistory();
+      if (currentSession?.id === sessionId) {
+        setCurrentSession( prev => prev ? { ...prev, title } : null);
+      }
     } catch (err) {
-      console.error('Failed to save session:', err);
+      console.error('Failed to update title:', err);
     }
   };
 
@@ -199,7 +201,7 @@ function App() {
         <main className="flex-1 overflow-hidden relative">
           <ChatInterface
             currentSession={currentSession}
-            onSaveSession={saveSession}
+            onUpdateTitle={updateTitle}
           />
         </main>
 

@@ -4,23 +4,21 @@ import { StructuredToolInterface } from "@langchain/core/tools";
 import { HumanMessage, SystemMessage, AIMessage, ToolMessage, BaseMessage } from "@langchain/core/messages";
 import { FileTool } from "./tools/FileTool";
 import { SystemTool } from "./tools/SystemTool";
+import { StorageService } from "./storage";
 import { homedir } from 'os';
 import { join } from 'path';
 import type { Message } from '../../src/types/verbos';
 
-interface SessionMemory {
-  summary: string;
-  recentMessages: Message[];
-}
-
 interface SmartContextConfig {
   maxRecentMessages: number;
+  summarizationThreshold: number;
   localModelName: string;
   ollamaBaseUrl: string;
 }
 
 const DEFAULT_CONFIG: SmartContextConfig = {
   maxRecentMessages: 10,
+  summarizationThreshold: 20, // Trigger summarization when total message count exceeds this
   localModelName: "llama3.2",
   ollamaBaseUrl: "http://localhost:11434",
 };
@@ -30,10 +28,11 @@ export class AgentService {
   private summaryModel: ChatOllama;
   private tools: StructuredToolInterface[];
   private modelWithTools: ReturnType<typeof this.chatModel.bindTools>;
-  private sessions: Map<string, SessionMemory> = new Map();
+  private storage: StorageService;
   private config: SmartContextConfig;
 
-  constructor(config: Partial<SmartContextConfig> = {}) {
+  constructor(storage: StorageService, config: Partial<SmartContextConfig> = {}) {
+    this.storage = storage;
     this.config = { ...DEFAULT_CONFIG, ...config };
 
     this.chatModel = new ChatGoogleGenerativeAI({
@@ -52,72 +51,67 @@ export class AgentService {
     console.log(`[AgentService] Initialized (Chat: Gemini, Summary: Ollama ${this.config.localModelName})`);
   }
 
-  private getMemory(sessionId: string): SessionMemory {
-    if (!this.sessions.has(sessionId)) {
-      this.sessions.set(sessionId, {
-        summary: '',
-        recentMessages: []
-      });
-    }
-    return this.sessions.get(sessionId)!;
-  }
-
   /**
-   * Summarizes history locally using Ollama to maintain privacy before context reaches the cloud.
+   * Summarizes history locally using Ollama to maintain privacy.
+   * This now updates persistent storage instead of in-memory state.
    */
-  private async updateMemory(sessionId: string, userMessage: string, assistantMessage: string): Promise<void> {
-    const memory = this.getMemory(sessionId);
+  private async updateMemory(sessionId: string): Promise<void> {
+    try {
+      // Get current summary and all messages
+      const summary = this.storage.getSummary(sessionId);
+      const session = this.storage.getSession(sessionId);
 
-    memory.recentMessages.push(
-      { role: 'user', content: userMessage },
-      { role: 'assistant', content: assistantMessage }
-    );
+      if (!session || session.messages.length < this.config.summarizationThreshold) {
+        return; // Not enough messages to warrant summarization
+      }
 
-    if (memory.recentMessages.length > this.config.maxRecentMessages) {
-      const messagesToSummarize = memory.recentMessages.slice(0, memory.recentMessages.length - this.config.maxRecentMessages);
-      memory.recentMessages = memory.recentMessages.slice(-this.config.maxRecentMessages);
+      const allMessages = session.messages;
+      const messagesToSummarize = allMessages.slice(0, allMessages.length - this.config.maxRecentMessages);
+
+      if (messagesToSummarize.length === 0) {
+        return; // Nothing new to summarize
+      }
 
       const summaryPrompt = `Summarize the following conversation history concisely, preserving key facts and user state. 
 Be factual. Do not repeat the history verbatim.
 
-Previous summary: ${memory.summary || 'None'}
+Previous summary: ${summary || 'None'}
 
 New messages:
 ${messagesToSummarize.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n')}
 
 Concise summary:`;
 
-      try {
-        const summaryResponse = await this.summaryModel.invoke([new HumanMessage(summaryPrompt)]);
-        memory.summary = typeof summaryResponse.content === 'string'
-          ? summaryResponse.content
-          : JSON.stringify(summaryResponse.content);
-      } catch (error) {
-        console.error('[AgentService] Local summarization failed. Using aggressive truncation for privacy.');
-        // Fallback: Aggressive truncation to avoid leaking raw text to the cloud in the next request
-        const fallbackSummary = messagesToSummarize
-          .map(m => `[${m.role.toUpperCase()}: ${m.content.substring(0, 30)}...]`)
-          .join(' ');
-        memory.summary = memory.summary
-          ? `${memory.summary} (Partially summarized: ${fallbackSummary})`
-          : fallbackSummary;
-      }
+      const summaryResponse = await this.summaryModel.invoke([new HumanMessage(summaryPrompt)]);
+      const newSummary = typeof summaryResponse.content === 'string'
+        ? summaryResponse.content
+        : JSON.stringify(summaryResponse.content);
+
+      this.storage.updateSummary(sessionId, newSummary);
+      console.log(`[AgentService] Updated summary for session ${sessionId}`);
+    } catch (error) {
+      console.error('[AgentService] Local summarization failed (non-fatal):', error);
+      // Summarization failure is non-fatal; we continue with raw message history
     }
   }
 
   clearSession(sessionId: string): void {
-    this.sessions.delete(sessionId);
-    console.log(`[AgentService] Session ${sessionId} cleared.`);
+    // With persistent storage, "clearing" just means we don't need to do anything here
+    // The session remains in the database. If we wanted to clear memory, we'd delete from storage.
+    console.log(`[AgentService] Session ${sessionId} cleared from memory (persisted in DB)`);
   }
 
-  private buildSystemInstructions(memory: SessionMemory): string {
+  private buildSystemInstructions(sessionId: string): string {
+    const summary = this.storage.getSummary(sessionId);
+    const recentMessages = this.storage.getRecentMessages(sessionId, this.config.maxRecentMessages);
+
     let historySection = '';
-    if (memory.summary) {
-      historySection += `CONVERSATION SUMMARY (Local Context):\n${memory.summary}\n\n`;
+    if (summary) {
+      historySection += `CONVERSATION SUMMARY (Local Context):\n${summary}\n\n`;
     }
-    if (memory.recentMessages.length > 0) {
+    if (recentMessages.length > 0) {
       historySection += 'RECENT MESSAGES:\n';
-      historySection += memory.recentMessages.map(m => `${m.role}: ${m.content}`).join('\n');
+      historySection += recentMessages.map(m => `${m.role}: ${m.content}`).join('\n');
       historySection += '\n\n';
     }
 
@@ -135,9 +129,11 @@ Concise summary:`;
 
   async ask(sessionId: string, prompt: string, onToken: (token: string) => void): Promise<void> {
     try {
-      const memory = this.getMemory(sessionId);
+      // Save user message to storage immediately
+      this.storage.addMessage(sessionId, 'user', prompt);
+
       const messages: BaseMessage[] = [
-        new SystemMessage(this.buildSystemInstructions(memory)),
+        new SystemMessage(this.buildSystemInstructions(sessionId)),
         new HumanMessage(prompt),
       ];
 
@@ -145,6 +141,7 @@ Concise summary:`;
 
       let iterations = 0;
       const maxIterations = 8;
+      let assistantResponse = '';
 
       while (iterations < maxIterations) {
         iterations++;
@@ -186,18 +183,29 @@ Concise summary:`;
           onToken("\n");
           const finalResponse = typeof response.content === "string" ? response.content : "";
           onToken(finalResponse);
+          assistantResponse = finalResponse;
 
-          await this.updateMemory(sessionId, prompt, finalResponse);
+          // Save assistant message to storage
+          this.storage.addMessage(sessionId, 'assistant', assistantResponse);
+
+          // Trigger summarization if needed (async, non-blocking)
+          this.updateMemory(sessionId).catch(err =>
+            console.error('[AgentService] Background summarization failed:', err)
+          );
+
           break;
         }
       }
 
       if (iterations >= maxIterations) {
-        onToken("\n\nAgent logic reached session threshold. Please refine your request.");
+        const fallbackMsg = "\n\nAgent logic reached session threshold. Please refine your request.";
+        onToken(fallbackMsg);
+        assistantResponse = fallbackMsg;
       }
     } catch (error) {
       console.error("AgentService.ask Error:", error);
-      onToken("\n\nCommunication failure. Ensure your API keys and local Ollama instance are active.");
+      const errorMsg = "\n\nCommunication failure. Ensure your API keys and local Ollama instance are active.";
+      onToken(errorMsg);
     }
   }
 }
