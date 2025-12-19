@@ -2,7 +2,19 @@ import React, { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import {
+  Send,
+  Bot,
+  User,
+  Sparkles,
+  ArrowUp,
+  Command,
+  Loader2,
+  Terminal,
+  Cpu,
+  ShieldCheck
+} from 'lucide-react';
 import type { ChatSession, Message } from '../types/verbos';
 
 interface ChatInterfaceProps {
@@ -15,6 +27,7 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -22,7 +35,7 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
+  }, [messages, isLoading]);
 
   useEffect(() => {
     if (currentSession) {
@@ -46,7 +59,6 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
     setInput('');
     setIsLoading(true);
 
-    // Update title on first message
     if (messages.length === 0) {
       const newTitle = input.slice(0, 50) + (input.length > 50 ? '...' : '');
       onUpdateTitle(currentSession.id, newTitle).catch(err => {
@@ -78,7 +90,6 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
           setIsLoading(false);
           window.verbos?.removeTokenListener();
           window.verbos?.removeStreamEndListener();
-          // Messages are auto-saved by AgentService
         });
 
         await window.verbos.askAgent(currentSession.id, userMsg.content);
@@ -91,130 +102,162 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
           );
           setMessages(finalMessages);
           setIsLoading(false);
-          // In fallback mode (no backend), messages aren't persisted
         }, 800);
       }
     } catch (error) {
       console.error('Agent error:', error);
       const errorMessages = messagesWithAssistant.map((msg, i) =>
         i === messagesWithAssistant.length - 1
-          ? { ...msg, content: `Error: Failed to contact agent.` }
+          ? { ...msg, content: `Error: Failed to contact agent. Please ensure the backend is running.` }
           : msg
       );
       setMessages(errorMessages);
       setIsLoading(false);
-      // Error messages are auto-saved by AgentService
     }
   };
 
   return (
     <div className="flex flex-col h-full bg-background relative">
-      {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto px-4 py-6 scroll-smooth custom-scrollbar">
-        <div className="max-w-3xl mx-auto space-y-6">
-          {messages.length === 0 && (
-            <div className="flex flex-col items-center justify-center h-[60vh] text-text-muted opacity-50 select-none">
-              <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" className="mb-4"><path d="M12 2a10 10 0 1 0 10 10 4 4 0 0 1-5-5 4 4 0 0 1-5-5c0-2 2-2 2-2" /></svg>
-              <p className="text-sm font-medium">VerbOS Agent Ready</p>
-              <p className="text-xs mt-1">Type a command to begin...</p>
+      {/* Messages Area - Scrollable Container */}
+      <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+        {messages.length === 0 ? (
+          <div className="h-full flex flex-col items-center justify-center px-6 py-8">
+            <div className="w-16 h-16 rounded-2xl bg-brand-primary/10 flex items-center justify-center text-brand-primary mb-6 border border-brand-primary/20 shadow-lg shadow-brand-primary/10">
+              <Sparkles size={32} strokeWidth={1.5} />
             </div>
-          )}
+            <h1 className="text-2xl font-display font-bold text-text-primary mb-2 text-center tracking-tight">How can I assist you today?</h1>
+            <p className="text-text-secondary text-sm max-w-md text-center leading-relaxed mb-8">
+              I am VerbOS, your agentic interface. I can help automate your workflow, manage system tasks, or just chat.
+            </p>
 
-          {messages.map((msg, index) => (
-            <div
-              key={index}
-              className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2 duration-300`}
-            >
+            <div className="grid grid-cols-2 gap-3 w-full max-w-md">
+              <div className="p-3 rounded-xl bg-surface-raised/50 border border-border/50 hover:border-brand-primary/30 hover:bg-surface-raised cursor-pointer transition-all group">
+                <Terminal size={16} className="text-brand-primary mb-2 group-hover:scale-110 transition-transform" />
+                <p className="text-xs font-bold text-text-primary mb-0.5">Modern Shell</p>
+                <p className="text-[10px] text-text-muted">Run system commands safely</p>
+              </div>
+              <div className="p-3 rounded-xl bg-surface-raised/50 border border-border/50 hover:border-brand-accent/30 hover:bg-surface-raised cursor-pointer transition-all group">
+                <Cpu size={16} className="text-brand-accent mb-2 group-hover:scale-110 transition-transform" />
+                <p className="text-xs font-bold text-text-primary mb-0.5">Agentic Logic</p>
+                <p className="text-[10px] text-text-muted">Multi-step task automation</p>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="max-w-3xl mx-auto px-6 py-4 space-y-5">
+            {messages.map((msg, index) => (
               <div
-                className={`max-w-[85%] rounded-lg p-4 shadow-sm text-sm leading-relaxed ${msg.role === 'user'
-                  ? 'bg-surfaceHighlight text-text-primary border border-border'
-                  : 'bg-transparent text-text-secondary pl-2 border-l-2 border-primary/50 rounded-none'
-                  }`}
+                key={index}
+                className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} group`}
               >
-                {msg.role === 'assistant' && (
-                  <div className="flex items-center gap-2 mb-2 text-xs font-semibold text-primary uppercase tracking-wider opacity-80 select-none">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a10 10 0 1 0 10 10 4 4 0 0 1-5-5 4 4 0 0 1-5-5c0-2 2-2 2-2" /></svg>
-                    <span>Agent</span>
+                <div className={`flex flex-col gap-1.5 max-w-[80%] ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                  <div className="flex items-center gap-2 px-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <span className={`text-[10px] font-semibold uppercase tracking-wider ${msg.role === 'user' ? 'text-brand-secondary' : 'text-brand-primary'}`}>
+                      {msg.role === 'user' ? 'You' : 'VerbOS'}
+                    </span>
                   </div>
-                )}
-                {msg.role === 'assistant' ? (
-                  <div className="prose prose-invert max-w-none">
-                    <ReactMarkdown
-                      remarkPlugins={[remarkGfm]}
-                      components={{
-                        code({ node, inline, className, children, ...props }: any) {
-                          const match = /language-(\w+)/.exec(className || '');
-                          return !inline && match ? (
-                            <SyntaxHighlighter
-                              style={oneDark as any}
-                              language={match[1]}
-                              PreTag="div"
-                              {...props}
-                            >
-                              {String(children).replace(/\n$/, '')}
-                            </SyntaxHighlighter>
-                          ) : (
-                            <code className={className} {...props}>
-                              {children}
-                            </code>
-                          );
-                        },
-                      }}
-                    >
-                      {msg.content}
-                    </ReactMarkdown>
+                  <div
+                    className={`rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-md transition-all hover:shadow-lg ${msg.role === 'user'
+                      ? 'bg-brand-primary text-background font-medium'
+                      : 'bg-surface-raised text-text-secondary border border-border/50 hover:border-brand-primary/20'
+                      }`}
+                  >
+                    {msg.role === 'assistant' ? (
+                      <div className="prose prose-invert prose-sm">
+                        <ReactMarkdown
+                          remarkPlugins={[remarkGfm]}
+                          components={{
+                            code({ node, inline, className, children, ...props }: any) {
+                              const match = /language-(\w+)/.exec(className || '');
+                              return !inline && match ? (
+                                <SyntaxHighlighter
+                                  style={vscDarkPlus as any}
+                                  language={match[1]}
+                                  PreTag="div"
+                                  className="!bg-background/80 !rounded-lg !text-xs !my-3 overflow-hidden !border !border-border/30"
+                                  {...props}
+                                >
+                                  {String(children).replace(/\n$/, '')}
+                                </SyntaxHighlighter>
+                              ) : (
+                                <code className={`${className} bg-background/60 text-brand-primary px-1.5 py-0.5 rounded text-xs font-mono border border-border/20`} {...props}>
+                                  {children}
+                                </code>
+                              );
+                            },
+                          }}
+                        >
+                          {msg.content}
+                        </ReactMarkdown>
+                      </div>
+                    ) : (
+                      <p className="whitespace-pre-wrap">{msg.content}</p>
+                    )}
                   </div>
-                ) : (
-                  <p className="whitespace-pre-wrap">{msg.content}</p>
-                )}
-              </div>
-            </div>
-          ))}
-
-          {isLoading && messages[messages.length - 1]?.role === 'assistant' && messages[messages.length - 1]?.content === '' && (
-            <div className="flex justify-start animate-in fade-in duration-300">
-              <div className="bg-transparent pl-0 border-l-2 border-primary/50 p-4 rounded-none">
-                <div className="flex items-center gap-2 mb-2 text-xs font-semibold text-primary uppercase tracking-wider opacity-80">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="animate-spin"><path d="M12 2v4" /><path d="m16.2 7.8 2.9-2.9" /><path d="M18 12h4" /><path d="m16.2 16.2 2.9 2.9" /><path d="M12 18v4" /><path d="m7.8 16.2-2.9 2.9" /><path d="M6 12H2" /><path d="m7.8 7.8-2.9-2.9" /></svg>
-                  <span>Thinking</span>
                 </div>
-                <div className="h-4 w-24 bg-surfaceHighlight/50 rounded animate-pulse"></div>
               </div>
-            </div>
-          )}
-          <div ref={messagesEndRef} />
-        </div>
+            ))}
+
+            {isLoading && messages[messages.length - 1]?.role === 'assistant' && messages[messages.length - 1]?.content === '' && (
+              <div className="flex justify-start">
+                <div className="bg-surface-raised border border-border/50 px-4 py-3 rounded-2xl shadow-md">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-brand-primary/10 flex items-center justify-center">
+                      <Bot size={16} className="text-brand-primary animate-pulse" />
+                    </div>
+                    <div>
+                      <div className="text-[10px] font-semibold text-brand-primary uppercase tracking-wider mb-1">Thinking</div>
+                      <div className="flex gap-1">
+                        <div className="w-1.5 h-1.5 bg-brand-primary/60 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                        <div className="w-1.5 h-1.5 bg-brand-primary/60 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                        <div className="w-1.5 h-1.5 bg-brand-primary/60 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+        )}
       </div>
 
       {/* Input Area */}
-      <div className="p-4 bg-background border-t border-border z-10">
+      <div className="px-6 py-3 border-t border-border/30 bg-background flex-shrink-0">
         <div className="max-w-3xl mx-auto">
-          <form onSubmit={handleSubmit} className="relative group">
-            <div className="absolute inset-0 bg-primary/5 rounded-lg blur-sm group-focus-within:bg-primary/10 transition-all duration-300"></div>
-            <div className="relative flex items-center bg-surface border border-border rounded-lg shadow-sm focus-within:border-primary/50 focus-within:shadow-[0_0_0_1px_rgba(59,130,246,0.1)] transition-all duration-200">
-              <div className="pl-3 text-text-muted">
-                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>
-              </div>
+          <form onSubmit={handleSubmit}>
+            <div className="flex items-center gap-3 bg-surface-overlay border border-border/60 rounded-2xl px-4 py-2 focus-within:border-brand-primary/50 transition-colors">
+              <Command size={18} className="text-text-muted flex-shrink-0" />
               <input
+                ref={inputRef}
                 type="text"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                placeholder="Ask VerbOS..."
-                className="flex-1 bg-transparent text-text-primary p-3 focus:outline-none font-sans placeholder:text-text-muted/50"
+                placeholder="Message VerbOS..."
+                className="flex-1 bg-transparent text-text-primary py-2 focus:outline-none text-sm placeholder:text-text-muted/50"
                 autoFocus
               />
               <button
                 type="submit"
                 disabled={isLoading || !input.trim()}
-                className="p-2 mr-1 text-text-muted hover:text-primary disabled:opacity-30 disabled:hover:text-text-muted transition-colors"
+                className={`p-2 rounded-xl transition-all ${input.trim() && !isLoading
+                  ? 'bg-brand-primary text-background hover:bg-brand-primary-hover'
+                  : 'bg-surface-raised text-text-muted opacity-50'
+                  }`}
               >
-                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></svg>
+                {isLoading ? <Loader2 size={16} className="animate-spin" /> : <ArrowUp size={16} strokeWidth={2.5} />}
               </button>
             </div>
           </form>
-          <div className="flex justify-center mt-2 gap-4 text-[10px] text-text-muted opacity-60">
-            <span className="flex items-center gap-1"><span className="bg-surface border border-border px-1 rounded text-[9px]">↵</span> to send</span>
-            <span className="flex items-center gap-1"><span className="bg-surface border border-border px-1 rounded text-[9px]">↑</span> for history</span>
+          <div className="flex justify-center gap-4 mt-2 text-[10px] text-text-dim">
+            <span className="flex items-center gap-1.5">
+              <kbd className="px-1.5 py-0.5 rounded border border-border bg-surface-raised text-[9px]">Enter</kbd>
+              Send
+            </span>
+            <span className="flex items-center gap-1.5">
+              <kbd className="px-1.5 py-0.5 rounded border border-border bg-surface-raised text-[9px]">Cmd</kbd>
+              Commands
+            </span>
           </div>
         </div>
       </div>
