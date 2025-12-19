@@ -128,3 +128,5 @@ A local LLM (Ollama) acts as a privacy mediator. It sanitizes context and summar
 
 ---
 This project is licensed under the [MIT License](LICENSE).
+
+[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=SalmanNouman_AugOS&metric=alert_status&token=6d301ab1cd42712a72a6ced60a1511de068664f8)](https://sonarcloud.io/summary/new_code?id=SalmanNouman_AugOS)
