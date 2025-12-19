@@ -187,8 +187,16 @@ function App() {
                 {chatHistory.map((chat) => (
                   <div
                     key={chat.id}
+                    role="button"
+                    tabIndex={0}
                     onClick={() => loadChat(chat.id)}
-                    className={`group flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all duration-200 border ${currentSession?.id === chat.id
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        loadChat(chat.id);
+                      }
+                    }}
+                    className={`group flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all duration-200 border outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/50 ${currentSession?.id === chat.id
                       ? 'bg-brand-primary/10 border-brand-primary/20 text-text-primary'
                       : 'border-transparent hover:bg-surface-raised hover:border-border-subtle text-text-secondary hover:text-text-primary'
                       }`}
