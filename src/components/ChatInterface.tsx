@@ -13,7 +13,9 @@ import {
   Loader2,
   Terminal,
   Cpu,
-  ShieldCheck
+  ShieldCheck,
+  RefreshCw,
+  AlertCircle
 } from 'lucide-react';
 import type { ChatSession, Message } from '../types/verbos';
 
@@ -26,6 +28,7 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [lastInput, setLastInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -37,41 +40,25 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
     scrollToBottom();
   }, [messages, isLoading]);
 
+  // Only update messages when the session ID changes to prevent flickering
+  // caused by parent component updates (like title changes) resetting local state
   useEffect(() => {
     if (currentSession) {
       setMessages(currentSession.messages);
     } else {
       setMessages([]);
     }
-  }, [currentSession]);
+  }, [currentSession?.id]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!input.trim() || isLoading || !currentSession) return;
+  const sendMessage = async (text: string) => {
+    if (!currentSession) return;
 
-    const userMsg: Message = {
-      role: 'user',
-      content: input,
-    };
-
-    const newMessages = [...messages, userMsg];
-    setMessages(newMessages);
-    setInput('');
     setIsLoading(true);
-
-    if (messages.length === 0) {
-      const newTitle = input.slice(0, 50) + (input.length > 50 ? '...' : '');
-      onUpdateTitle(currentSession.id, newTitle).catch(err => {
-        console.error('Failed to update title:', err);
-      });
-    }
-
     const assistantMsg: Message = {
       role: 'assistant',
       content: '',
     };
-    const messagesWithAssistant = [...newMessages, assistantMsg];
-    setMessages(messagesWithAssistant);
+    setMessages(prev => [...prev, assistantMsg]);
 
     try {
       if (window.verbos && window.verbos.askAgent) {
@@ -92,28 +79,59 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
           window.verbos?.removeStreamEndListener();
         });
 
-        await window.verbos.askAgent(currentSession.id, userMsg.content);
+        await window.verbos.askAgent(currentSession.id, text);
       } else {
         setTimeout(async () => {
-          const finalMessages = messagesWithAssistant.map((msg, i) =>
-            i === messagesWithAssistant.length - 1
-              ? { ...msg, content: `I received: "${userMsg.content}". Connect to VerbOS backend for full functionality.` }
-              : msg
-          );
-          setMessages(finalMessages);
+          setMessages(prev => {
+            const updated = [...prev];
+            updated[updated.length - 1] = { ...updated[updated.length - 1], content: `I received: "${text}". Connect to VerbOS backend for full functionality.` };
+            return updated;
+          });
           setIsLoading(false);
         }, 800);
       }
     } catch (error) {
       console.error('Agent error:', error);
-      const errorMessages = messagesWithAssistant.map((msg, i) =>
-        i === messagesWithAssistant.length - 1
-          ? { ...msg, content: `Error: Failed to contact agent. Please ensure the backend is running.` }
-          : msg
-      );
-      setMessages(errorMessages);
+      setMessages(prev => {
+        const updated = [...prev];
+        updated[updated.length - 1] = { ...updated[updated.length - 1], content: `Error: Failed to contact agent. Please ensure the backend is running.` };
+        return updated;
+      });
       setIsLoading(false);
     }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!input.trim() || isLoading || !currentSession) return;
+
+    const userMsg: Message = {
+      role: 'user',
+      content: input,
+    };
+
+    setMessages(prev => [...prev, userMsg]);
+    setLastInput(input);
+    const currentInput = input;
+    setInput('');
+
+    if (messages.length === 0) {
+      const newTitle = currentInput.slice(0, 50) + (currentInput.length > 50 ? '...' : '');
+      onUpdateTitle(currentSession.id, newTitle).catch(err => {
+        console.error('Failed to update title:', err);
+      });
+    }
+
+    await sendMessage(currentInput);
+  };
+
+  const handleRetry = async () => {
+    if (!lastInput || isLoading || !currentSession) return;
+    await sendMessage(lastInput);
+  };
+
+  const isErrorMessage = (content: string) => {
+    return content.includes('Error:') || content.includes('❌ Failed:') || content.includes('Agent logic reached session threshold');
   };
 
   return (
@@ -145,58 +163,69 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
           </div>
         ) : (
           <div className="max-w-3xl mx-auto px-6 py-4 space-y-5">
-            {messages.map((msg, index) => (
-              <div
-                key={index}
-                className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} group`}
-              >
-                <div className={`flex flex-col gap-1.5 max-w-[80%] ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-                  <div className="flex items-center gap-2 px-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <span className={`text-[10px] font-semibold uppercase tracking-wider ${msg.role === 'user' ? 'text-brand-secondary' : 'text-brand-primary'}`}>
-                      {msg.role === 'user' ? 'You' : 'VerbOS'}
-                    </span>
-                  </div>
-                  <div
-                    className={`rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-md transition-all hover:shadow-lg ${msg.role === 'user'
-                      ? 'bg-brand-primary text-background font-medium'
-                      : 'bg-surface-raised text-text-secondary border border-border/50 hover:border-brand-primary/20'
-                      }`}
-                  >
-                    {msg.role === 'assistant' ? (
-                      <div className="prose prose-invert prose-sm">
-                        <ReactMarkdown
-                          remarkPlugins={[remarkGfm]}
-                          components={{
-                            code({ node, inline, className, children, ...props }: any) {
-                              const match = /language-(\w+)/.exec(className || '');
-                              return !inline && match ? (
-                                <SyntaxHighlighter
-                                  style={vscDarkPlus as any}
-                                  language={match[1]}
-                                  PreTag="div"
-                                  className="!bg-background/80 !rounded-lg !text-xs !my-3 overflow-hidden !border !border-border/30"
-                                  {...props}
-                                >
-                                  {String(children).replace(/\n$/, '')}
-                                </SyntaxHighlighter>
-                              ) : (
-                                <code className={`${className} bg-background/60 text-brand-primary px-1.5 py-0.5 rounded text-xs font-mono border border-border/20`} {...props}>
-                                  {children}
-                                </code>
-                              );
-                            },
-                          }}
-                        >
-                          {msg.content}
-                        </ReactMarkdown>
-                      </div>
-                    ) : (
-                      <p className="whitespace-pre-wrap">{msg.content}</p>
-                    )}
+            {messages.map((msg, index) => {
+              const isError = isErrorMessage(msg.content);
+              return (
+                <div
+                  key={index}
+                  className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} group`}
+                >
+                  <div className={`flex flex-col gap-1.5 max-w-[80%] ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                    <div className="flex items-center gap-2 px-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <span className={`text-[10px] font-semibold uppercase tracking-wider ${msg.role === 'user' ? 'text-brand-secondary' : 'text-brand-primary'}`}>
+                        {msg.role === 'user' ? 'You' : 'VerbOS'}
+                      </span>
+                    </div>
+                    <div
+                      className={`rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-md transition-all hover:shadow-lg ${msg.role === 'user'
+                        ? 'bg-brand-primary text-background font-medium'
+                        : isError
+                          ? 'bg-red-500/5 text-red-600 border border-red-500/20'
+                          : 'bg-surface-raised text-text-secondary border border-border/50 hover:border-brand-primary/20'
+                        }`}
+                    >
+                      {isError && msg.role === 'assistant' && (
+                        <div className="flex items-center gap-2 mb-2 text-red-500 font-semibold text-xs uppercase tracking-wide">
+                          <AlertCircle size={14} />
+                          <span>Action Failed</span>
+                        </div>
+                      )}
+                      {msg.role === 'assistant' ? (
+                        <div className="prose prose-invert prose-sm">
+                          <ReactMarkdown
+                            remarkPlugins={[remarkGfm]}
+                            components={{
+                              code({ node, inline, className, children, ...props }: any) {
+                                const match = /language-(\w+)/.exec(className || '');
+                                return !inline && match ? (
+                                  <SyntaxHighlighter
+                                    style={vscDarkPlus as any}
+                                    language={match[1]}
+                                    PreTag="div"
+                                    className="!bg-background/80 !rounded-lg !text-xs !my-3 overflow-hidden !border !border-border/30"
+                                    {...props}
+                                  >
+                                    {String(children).replace(/\n$/, '')}
+                                  </SyntaxHighlighter>
+                                ) : (
+                                  <code className={`${className} bg-background/60 text-brand-primary px-1.5 py-0.5 rounded text-xs font-mono border border-border/20`} {...props}>
+                                    {children}
+                                  </code>
+                                );
+                              },
+                            }}
+                          >
+                            {msg.content}
+                          </ReactMarkdown>
+                        </div>
+                      ) : (
+                        <p className="whitespace-pre-wrap">{msg.content}</p>
+                      )}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
 
             {isLoading && messages[messages.length - 1]?.role === 'assistant' && messages[messages.length - 1]?.content === '' && (
               <div className="flex justify-start">
@@ -217,6 +246,20 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
                 </div>
               </div>
             )}
+            
+            {/* Retry Button */}
+            {!isLoading && messages.length > 0 && isErrorMessage(messages[messages.length - 1].content) && (
+              <div className="flex justify-center mt-4 animate-in fade-in slide-in-from-bottom-2">
+                <button
+                  onClick={handleRetry}
+                  className="flex items-center gap-2 px-4 py-2 bg-surface-raised hover:bg-surface-overlay border border-border rounded-xl text-xs font-medium text-text-secondary transition-all shadow-sm hover:shadow-md active:scale-95"
+                >
+                  <RefreshCw size={14} />
+                  <span>Retry Last Request</span>
+                </button>
+              </div>
+            )}
+
             <div ref={messagesEndRef} />
           </div>
         )}

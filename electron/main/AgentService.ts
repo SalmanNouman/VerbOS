@@ -157,14 +157,14 @@ Concise summary:`;
             if (tool) {
               try {
                 const result = await tool.invoke(toolCall.args);
-                onToken(" Done\n");
+                onToken(" ✅ Done\n");
                 messages.push(new ToolMessage({
                   tool_call_id: toolCall.id || "",
                   content: result,
                 }));
               } catch (error) {
                 const errorMsg = error instanceof Error ? error.message : "Unknown error";
-                onToken(` Error: ${errorMsg}\n`);
+                onToken(` ❌ Failed: ${errorMsg}\n`);
                 messages.push(new ToolMessage({
                   tool_call_id: toolCall.id || "",
                   content: `Error: ${errorMsg}`,
@@ -172,7 +172,7 @@ Concise summary:`;
               }
             } else {
               const errorMsg = `Tool ${toolCall.name} not found`;
-              onToken(` Error: ${errorMsg}\n`);
+              onToken(` ❌ Failed: ${errorMsg}\n`);
               messages.push(new ToolMessage({
                 tool_call_id: toolCall.id || "",
                 content: `Error: ${errorMsg}`,

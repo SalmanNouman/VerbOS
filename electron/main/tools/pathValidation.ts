@@ -34,6 +34,10 @@ const SECURITY_CONFIG = {
  * @throws Error if path is not allowed
  */
 export async function validatePath(requestedPath: string): Promise<string> {
+  if (!requestedPath) {
+    throw new Error('Path cannot be empty');
+  }
+
   // Normalize and resolve to absolute path
   // If path is relative, resolve it relative to user's home directory
   let absolutePath = resolve(requestedPath);
@@ -47,7 +51,10 @@ export async function validatePath(requestedPath: string): Promise<string> {
   try {
     await fs.access(absolutePath);
   } catch {
-    throw new Error(`Path does not exist: ${absolutePath}`);
+    // If it's a write operation, the file might not exist yet, but we need to check the parent.
+    // However, this function is general.
+    // We'll throw a specific error.
+    throw new Error(`File System Error: The path '${absolutePath}' does not exist.`);
   }
   
   // Resolve symlinks to prevent symlink traversal attacks
@@ -56,7 +63,7 @@ export async function validatePath(requestedPath: string): Promise<string> {
   // Check against blocked paths
   for (const blocked of SECURITY_CONFIG.blockedPaths) {
     if (realPath.toLowerCase().startsWith(blocked.toLowerCase())) {
-      throw new Error(`Access denied: Path is in a restricted system directory`);
+      throw new Error(`Security Violation: Access to system directory '${realPath}' is strictly prohibited.`);
     }
   }
   
@@ -72,8 +79,7 @@ export async function validatePath(requestedPath: string): Promise<string> {
   
   if (!isAllowed) {
     throw new Error(
-      `Access denied: Path must be within user home directory or current working directory. ` +
-      `Requested: ${realPath}`
+      `Security Violation: Access to '${realPath}' is denied. Operations are restricted to the User Home Directory and the Project Directory.`
     );
   }
   
@@ -90,11 +96,11 @@ export async function validateReadPath(path: string): Promise<string> {
   try {
     const stats = await fs.stat(validatedPath);
     if (stats.isDirectory()) {
-      throw new Error(`Path is a directory, not a file: ${validatedPath}`);
+      throw new Error(`Operation Failed: The path '${validatedPath}' is a directory, not a file.`);
     }
   } catch (error) {
     if (error instanceof Error && error.message.includes('no such file')) {
-      throw new Error(`File not found: ${validatedPath}`);
+      throw new Error(`File Not Found: The file '${validatedPath}' could not be found.`);
     }
     throw error;
   }
@@ -112,11 +118,11 @@ export async function validateDirectoryPath(path: string): Promise<string> {
   try {
     const stats = await fs.stat(validatedPath);
     if (!stats.isDirectory()) {
-      throw new Error(`Path is not a directory: ${validatedPath}`);
+      throw new Error(`Operation Failed: The path '${validatedPath}' is not a directory.`);
     }
   } catch (error) {
     if (error instanceof Error && error.message.includes('no such file')) {
-      throw new Error(`Directory not found: ${validatedPath}`);
+      throw new Error(`Directory Not Found: The directory '${validatedPath}' could not be found.`);
     }
     throw error;
   }
@@ -128,6 +134,10 @@ export async function validateDirectoryPath(path: string): Promise<string> {
  * Validates a path for file writing operations
  */
 export async function validateWritePath(path: string): Promise<string> {
+  if (!path) {
+    throw new Error('Path cannot be empty');
+  }
+
   // Resolve to an absolute path using the same rules as validatePath,
   // but do not require the file itself to exist.
   let absolutePath = resolve(path);
@@ -137,7 +147,15 @@ export async function validateWritePath(path: string): Promise<string> {
 
   // Validate the parent directory (must exist, be a directory, and be within allowed roots).
   const parentDir = resolve(absolutePath, '..');
-  await validateDirectoryPath(parentDir);
+  
+  try {
+    await validateDirectoryPath(parentDir);
+  } catch (error) {
+      if (error instanceof Error && error.message.includes('Directory Not Found')) {
+          throw new Error(`Operation Failed: The parent directory '${parentDir}' does not exist.`);
+      }
+      throw error;
+  }
 
   // If the target file already exists, resolve its real path and fully validate it
   // to defend against symlink attacks.

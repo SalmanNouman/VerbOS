@@ -16,54 +16,48 @@ export class SystemTool {
     description: 'Get information about the current operating system and environment',
     schema: z.object({}),
     func: async () => {
-      try {
-        const info = {
-          platform: platform(),
-          arch: arch(),
-          os_release: release(),
-          hostname: hostname(),
-          home_directory: homedir(),
-          temp_directory: tmpdir(),
-          memory: {
-            total: Math.round(totalmem() / 1024 / 1024) + ' MB',
-            free: Math.round(freemem() / 1024 / 1024) + ' MB',
-          },
-          cpu: {
-            model: cpus()[0]?.model || 'Unknown',
-            cores: cpus().length,
-          },
-          network: {
-            interfaces: Object.keys(netInterfaces).filter(iface => 
-              netInterfaces[iface]?.some(addr => !addr.internal)
-            ),
-          },
-        };
+      // Errors will be caught by the AgentService
+      const info = {
+        platform: platform(),
+        arch: arch(),
+        os_release: release(),
+        hostname: hostname(),
+        home_directory: homedir(),
+        temp_directory: tmpdir(),
+        memory: {
+          total: Math.round(totalmem() / 1024 / 1024) + ' MB',
+          free: Math.round(freemem() / 1024 / 1024) + ' MB',
+        },
+        cpu: {
+          model: cpus()[0]?.model || 'Unknown',
+          cores: cpus().length,
+        },
+        network: {
+          interfaces: Object.keys(netInterfaces).filter(iface => 
+            netInterfaces[iface]?.some(addr => !addr.internal)
+          ),
+        },
+      };
 
-        // Add platform-specific info
-        if (platform() === 'win32') {
-          try {
-            const { stdout } = await execAsync('wmic os get Caption,Version /value');
-            const windowsInfo = stdout
-              .split('\n')
-              .filter(line => line.includes('='))
-              .reduce((acc, line) => {
-                const [key, value] = line.split('=');
-                acc[key.trim().toLowerCase()] = value.trim();
-                return acc;
-              }, {} as Record<string, string>);
-            (info as any)['windows_info'] = windowsInfo;
-          } catch {
-            // Ignore Windows-specific info errors
-          }
+      // Add platform-specific info
+      if (platform() === 'win32') {
+        try {
+          const { stdout } = await execAsync('wmic os get Caption,Version /value');
+          const windowsInfo = stdout
+            .split('\n')
+            .filter(line => line.includes('='))
+            .reduce((acc, line) => {
+              const [key, value] = line.split('=');
+              acc[key.trim().toLowerCase()] = value.trim();
+              return acc;
+            }, {} as Record<string, string>);
+          (info as any)['windows_info'] = windowsInfo;
+        } catch {
+          // Ignore Windows-specific info errors, this is non-critical
         }
-
-        return JSON.stringify(info, null, 2);
-      } catch (error) {
-        if (error instanceof Error) {
-          return `Error: ${error.message}`;
-        }
-        return 'Unknown error occurred while getting system info';
       }
+
+      return JSON.stringify(info, null, 2);
     },
   });
 
