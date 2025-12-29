@@ -18,15 +18,16 @@ VerbOS aims to be the **Interface** for modern computer interaction:
 
 ## Key Features
 
-- **Agentic Chat Interface:** Powered by Google Gemini for complex reasoning and Ollama for local tasks.
+- **Multi-Agent Orchestration:** Powered by **LangGraph**, utilizing a Supervisor-Worker architecture for specialized task handling.
+- **Specialized Workers:**
+  - **FileSystem Worker:** Handle complex file operations (read, write, list, delete) with path validation.
+  - **System Worker:** Execute shell commands and query OS information.
+  - **Code Worker:** Generate and analyze code.
+  - **Researcher Worker:** Utilize local LLMs for deep thinking and planning.
+- **Human-In-The-Loop (HITL):** Sensitive actions (like writing files or running commands) require explicit user approval via the UI.
 - **OS Integration:** Deep integration with the file system and system primitives.
-- **Modular Tools:**
-  - **FileTool:** Securely list, read, and write files.
-  - **SystemTool:** Query system information and execute safe commands.
-  - More Tools coming soon...
-- **Privacy-First Brain:** Local summarization via Ollama ensures sensitive context stays on your device.
 - **Persistent Memory:** SQLite-based storage for long-term conversation history and smart context window management.
-- **Streaming Responses:** Real-time feedback as the Agent "thinks" and executes steps.
+- **Streaming Responses:** Real-time feedback with Markdown support and syntax highlighting.
 
 ---
 
@@ -37,7 +38,7 @@ VerbOS adheres to a strict, modern tech stack for performance and security:
 - **Runtime:** [Electron](https://www.electronjs.org/) (Cross-platform desktop container)
 - **Frontend:** [React](https://react.dev/) + [TypeScript](https://www.typescriptlang.org/) + [Vite](https://vitejs.dev/) + [Tailwind CSS](https://tailwindcss.com/)
 - **Backend:** Node.js (Electron Main Process)
-- **AI Orchestration:** [LangChain.js](https://js.langchain.com/)
+- **AI Orchestration:** [LangGraph](https://langchain-ai.github.io/langgraphjs/)
 - **Model Layer:** 
   - **Cloud:** Google Gemini 2.0 Flash (via `@langchain/google-genai`)
   - **Local:** Ollama (via `@langchain/ollama`)
@@ -49,15 +50,17 @@ VerbOS adheres to a strict, modern tech stack for performance and security:
 
 ### Secure IPC Bridge
 VerbOS follows strict Electron security patterns:
-- **No `remote` module:** Ensuring modern security standards.
 - **Context Isolation:** The Renderer process has no direct access to Node.js.
-- **Type-Safe IPC:** All communication happens through a secure `ContextBridge` in `preload.ts`, exposing only necessary methods like `window.electron.askAgent()`.
+- **Type-Safe IPC:** Communication happens through a secure `ContextBridge`, exposing only necessary methods like `window.electron.askAgent()`.
 
-### The Agent Loop (ReAct)
-The Agent runs in the Main Process and follows the **ReAct Pattern** (Reason -> Act -> Observe). It breaks down user requests into actionable tool calls, observes the results, and iterates until the goal is met.
+### Supervisor-Worker Pattern
+VerbOS moves beyond simple ReAct loops to a sophisticated **Supervisor-Worker** architecture:
+1.  **Supervisor:** The central "brain" that analyzes user intent and routes the task to the most appropriate worker.
+2.  **Workers:** Specialized sub-agents (File, System, Code, Researcher) that possess specific tools and prompts for their domain.
+3.  **Graph State:** A shared state object manages the conversation history, current steps, and agent outputs across the graph.
 
-### Mediator Architecture
-A local LLM (Ollama) acts as a privacy mediator. It sanitizes context and summarizes history locally before any high-level intent is passed to cloud models.
+### Human-In-The-Loop (HITL)
+Security is paramount. The graph includes interrupt points before sensitive tool executions. The UI presents an approval card to the user, who must explicitly "Approve" or "Reject" the action before the agent proceeds.
 
 ---
 
