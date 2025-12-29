@@ -5,18 +5,34 @@ import { contextBridge, ipcRenderer } from 'electron';
 contextBridge.exposeInMainWorld('verbos', {
   ping: () => ipcRenderer.invoke('ping'),
   askAgent: (sessionId: string, prompt: string) => ipcRenderer.invoke('ask-agent', { sessionId, prompt }),
-  onToken: (callback: (token: string) => void) => {
-    ipcRenderer.on('agent-token', (_event, token: string) => callback(token));
+  
+  // Event listeners for the new graph-based agent
+  onAgentEvent: (callback: (event: any) => void) => {
+    ipcRenderer.on('agent-event', (_event, agentEvent: any) => callback(agentEvent));
   },
   onStreamEnd: (callback: () => void) => {
     ipcRenderer.on('stream-end', callback);
   },
-  removeTokenListener: () => {
-    ipcRenderer.removeAllListeners('agent-token');
+  removeAgentEventListener: () => {
+    ipcRenderer.removeAllListeners('agent-event');
   },
   removeStreamEndListener: () => {
     ipcRenderer.removeAllListeners('stream-end');
   },
+
+  // HITL approval handlers
+  approveAction: (sessionId: string) => ipcRenderer.invoke('agent:approve', sessionId),
+  denyAction: (sessionId: string, reason?: string) => ipcRenderer.invoke('agent:deny', sessionId, reason),
+  resumeAgent: (sessionId: string) => ipcRenderer.invoke('agent:resume', sessionId),
+
+  // Legacy token listener (for backwards compatibility)
+  onToken: (callback: (token: string) => void) => {
+    ipcRenderer.on('agent-token', (_event, token: string) => callback(token));
+  },
+  removeTokenListener: () => {
+    ipcRenderer.removeAllListeners('agent-token');
+  },
+
   history: {
     create: (title?: string) => ipcRenderer.invoke('history:create', title),
     list: () => ipcRenderer.invoke('history:list'),
