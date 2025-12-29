@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { SystemWorker } from '../SystemWorker';
 import { AIMessage, ToolMessage } from '@langchain/core/messages';
 import type { GraphStateType } from '../../state';
+import { mockModelResponse } from './test-utils';
 
 // Mock path validation to always pass for tests
 vi.mock('../../tools/pathValidation', () => ({
@@ -32,10 +33,7 @@ describe('SystemWorker', () => {
     worker = new SystemWorker();
     
     // Mock the model invocation
-    vi.spyOn((worker as any).modelWithTools, 'invoke').mockResolvedValue(new AIMessage({
-      content: 'Thinking...',
-      tool_calls: []
-    }));
+    mockModelResponse(worker, { content: 'Thinking...' });
   });
 
   afterEach(() => {
@@ -49,14 +47,13 @@ describe('SystemWorker', () => {
   });
 
   it('should allow safe commands immediately', async () => {
-    vi.spyOn((worker as any).modelWithTools, 'invoke').mockResolvedValue(new AIMessage({
-      content: '',
+    mockModelResponse(worker, {
       tool_calls: [{
         name: 'execute_shell_command',
         args: { command: 'echo hello' },
         id: 'call-1'
       }]
-    }));
+    });
 
     const state: GraphStateType = { messages: [] } as any;
     const result = await worker.process(state);
@@ -67,14 +64,13 @@ describe('SystemWorker', () => {
   });
 
   it('should trigger HITL for sensitive commands', async () => {
-    vi.spyOn((worker as any).modelWithTools, 'invoke').mockResolvedValue(new AIMessage({
-      content: '',
+    mockModelResponse(worker, {
       tool_calls: [{
         name: 'execute_shell_command',
         args: { command: 'npm install' },
         id: 'call-2'
       }]
-    }));
+    });
 
     const state: GraphStateType = { messages: [] } as any;
     const result = await worker.process(state);

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ResearcherWorker } from '../ResearcherWorker';
 import { AIMessage } from '@langchain/core/messages';
 import type { GraphStateType } from '../../state';
+import { mockModelResponse } from './test-utils';
 
 describe('ResearcherWorker', () => {
   let worker: ResearcherWorker;
@@ -11,10 +12,7 @@ describe('ResearcherWorker', () => {
     worker = new ResearcherWorker();
     
     // Mock the model invocation
-    vi.spyOn((worker as any).modelWithTools, 'invoke').mockResolvedValue(new AIMessage({
-      content: 'Thinking...',
-      tool_calls: []
-    }));
+    mockModelResponse(worker, { content: 'Thinking...' });
   });
 
   afterEach(() => {
@@ -32,14 +30,13 @@ describe('ResearcherWorker', () => {
   });
 
   it('should use summarize_context tool correctly', async () => {
-    vi.spyOn((worker as any).modelWithTools, 'invoke').mockResolvedValue(new AIMessage({
-      content: '',
+    mockModelResponse(worker, {
       tool_calls: [{
         name: 'summarize_context',
         args: { text: 'Long text...', maxPoints: 3 },
         id: 'call-1'
       }]
-    }));
+    });
 
     const state: GraphStateType = { messages: [] } as any;
     const result = await worker.process(state);
@@ -48,14 +45,13 @@ describe('ResearcherWorker', () => {
   });
 
   it('should use extract_facts tool correctly', async () => {
-    vi.spyOn((worker as any).modelWithTools, 'invoke').mockResolvedValue(new AIMessage({
-      content: '',
+    mockModelResponse(worker, {
       tool_calls: [{
         name: 'extract_facts',
         args: { text: 'Facts...', topic: 'science' },
         id: 'call-2'
       }]
-    }));
+    });
 
     const state: GraphStateType = { messages: [] } as any;
     const result = await worker.process(state);
@@ -64,14 +60,13 @@ describe('ResearcherWorker', () => {
   });
 
   it('should use analyze_code_context tool correctly', async () => {
-    vi.spyOn((worker as any).modelWithTools, 'invoke').mockResolvedValue(new AIMessage({
-      content: '',
+    mockModelResponse(worker, {
       tool_calls: [{
         name: 'analyze_code_context',
         args: { code: 'const x = 1;', analysisType: 'issues' },
         id: 'call-3'
       }]
-    }));
+    });
 
     const state: GraphStateType = { messages: [] } as any;
     const result = await worker.process(state);

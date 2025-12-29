@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { CodeWorker } from '../CodeWorker';
 import { AIMessage, ToolMessage } from '@langchain/core/messages';
 import type { GraphStateType } from '../../state';
+import { mockModelResponse } from './test-utils';
 
 describe('CodeWorker', () => {
   let worker: CodeWorker;
@@ -11,10 +12,7 @@ describe('CodeWorker', () => {
     worker = new CodeWorker();
     
     // Mock the model invocation
-    vi.spyOn((worker as any).modelWithTools, 'invoke').mockResolvedValue(new AIMessage({
-      content: 'Thinking...',
-      tool_calls: []
-    }));
+    mockModelResponse(worker, { content: 'Thinking...' });
   });
 
   afterEach(() => {
@@ -34,14 +32,13 @@ describe('CodeWorker', () => {
 
   it('should use analyze_code tool correctly', async () => {
     // Mock model choosing to call analyze_code
-    vi.spyOn((worker as any).modelWithTools, 'invoke').mockResolvedValue(new AIMessage({
-      content: '',
+    mockModelResponse(worker, {
       tool_calls: [{
         name: 'analyze_code',
         args: { code: 'const a = 1;', focusAreas: ['bugs'] },
         id: 'call-1'
       }]
-    }));
+    });
 
     const state: GraphStateType = { messages: [] } as any;
     const result = await worker.process(state);
@@ -54,14 +51,13 @@ describe('CodeWorker', () => {
   });
 
   it('should use generate_code tool correctly', async () => {
-    vi.spyOn((worker as any).modelWithTools, 'invoke').mockResolvedValue(new AIMessage({
-      content: '',
+    mockModelResponse(worker, {
       tool_calls: [{
         name: 'generate_code',
         args: { requirements: 'A function to add numbers', language: 'typescript', style: 'minimal' },
         id: 'call-2'
       }]
-    }));
+    });
 
     const state: GraphStateType = { messages: [] } as any;
     const result = await worker.process(state);
@@ -70,14 +66,13 @@ describe('CodeWorker', () => {
   });
 
   it('should use refactor_code tool correctly', async () => {
-    vi.spyOn((worker as any).modelWithTools, 'invoke').mockResolvedValue(new AIMessage({
-      content: '',
+    mockModelResponse(worker, {
       tool_calls: [{
         name: 'refactor_code',
         args: { code: 'var x = 1;', goals: ['readability'] },
         id: 'call-3'
       }]
-    }));
+    });
 
     const state: GraphStateType = { messages: [] } as any;
     const result = await worker.process(state);
@@ -87,14 +82,13 @@ describe('CodeWorker', () => {
   });
 
   it('should use explain_code tool correctly', async () => {
-    vi.spyOn((worker as any).modelWithTools, 'invoke').mockResolvedValue(new AIMessage({
-      content: '',
+    mockModelResponse(worker, {
       tool_calls: [{
         name: 'explain_code',
         args: { code: 'console.log("hi")', detailLevel: 'brief' },
         id: 'call-4'
       }]
-    }));
+    });
 
     const state: GraphStateType = { messages: [] } as any;
     const result = await worker.process(state);

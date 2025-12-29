@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { FileSystemWorker } from '../FileSystemWorker';
 import { AIMessage } from '@langchain/core/messages';
 import type { GraphStateType } from '../../state';
+import { mockModelResponse } from './test-utils';
 
 // Mock the dependencies
 vi.mock('fs/promises', () => ({
@@ -29,10 +30,7 @@ describe('FileSystemWorker', () => {
     worker = new FileSystemWorker();
     
     // Mock the model invocation
-    vi.spyOn((worker as any).modelWithTools, 'invoke').mockResolvedValue(new AIMessage({
-      content: 'Thinking...',
-      tool_calls: []
-    }));
+    mockModelResponse(worker, { content: 'Thinking...' });
   });
 
   afterEach(() => {
@@ -49,14 +47,13 @@ describe('FileSystemWorker', () => {
   });
 
   it('should trigger HITL for write_file', async () => {
-    vi.spyOn((worker as any).modelWithTools, 'invoke').mockResolvedValue(new AIMessage({
-      content: '',
+    mockModelResponse(worker, {
       tool_calls: [{
         name: 'write_file',
         args: { path: '/test/file.txt', content: 'test' },
         id: 'call-1'
       }]
-    }));
+    });
 
     const state: GraphStateType = { messages: [] } as any;
     const result = await worker.process(state);
@@ -66,14 +63,13 @@ describe('FileSystemWorker', () => {
   });
 
   it('should trigger HITL for delete_file', async () => {
-    vi.spyOn((worker as any).modelWithTools, 'invoke').mockResolvedValue(new AIMessage({
-      content: '',
+    mockModelResponse(worker, {
       tool_calls: [{
         name: 'delete_file',
         args: { path: '/test/file.txt' },
         id: 'call-2'
       }]
-    }));
+    });
 
     const state: GraphStateType = { messages: [] } as any;
     const result = await worker.process(state);

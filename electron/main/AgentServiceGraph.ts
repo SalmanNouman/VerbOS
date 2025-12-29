@@ -34,31 +34,9 @@ export class AgentServiceGraph {
 
       onEvent({ type: 'status', message: 'Processing...' });
 
-      let finalResponse = '';
-
-      for await (const event of this.graph.stream(sessionId, prompt)) {
-        const agentEvent = this.mapGraphEvent(event);
-        if (agentEvent) {
-          onEvent(agentEvent);
-        }
-
-        // Capture final response
-        if (event.type === 'complete') {
-          finalResponse = event.data.response;
-        }
-      }
-
-      // Save assistant response to storage
-      if (finalResponse) {
-        this.storage.addMessage(sessionId, 'assistant', finalResponse);
-      }
-
-      onEvent({ type: 'done' });
+      await this.processStream(sessionId, prompt, onEvent);
     } catch (error) {
-      GraphLogger.error('SYSTEM', 'AgentServiceGraph error', error);
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      onEvent({ type: 'error', message: errorMessage });
-      onEvent({ type: 'done' });
+      this.handleError(error, onEvent);
     }
   }
 
@@ -84,30 +62,53 @@ export class AgentServiceGraph {
     onEvent: (event: AgentEvent) => void
   ): Promise<void> {
     try {
-      let finalResponse = '';
-
-      for await (const event of this.graph.stream(sessionId, '')) {
-        const agentEvent = this.mapGraphEvent(event);
-        if (agentEvent) {
-          onEvent(agentEvent);
-        }
-
-        if (event.type === 'complete') {
-          finalResponse = event.data.response;
-        }
-      }
-
-      if (finalResponse) {
-        this.storage.addMessage(sessionId, 'assistant', finalResponse);
-      }
-
-      onEvent({ type: 'done' });
+      await this.processStream(sessionId, '', onEvent);
     } catch (error) {
-      GraphLogger.error('SYSTEM', 'AgentServiceGraph resume error', error);
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      onEvent({ type: 'error', message: errorMessage });
-      onEvent({ type: 'done' });
+      this.handleError(error, onEvent);
     }
+  }
+
+  /**
+   * Common logic to stream events from the graph
+   */
+  private async processStream(
+    sessionId: string,
+    input: string,
+    onEvent: (event: AgentEvent) => void
+  ): Promise<void> {
+    let finalResponse = '';
+
+    for await (const event of this.graph.stream(sessionId, input)) {
+      const agentEvent = this.mapGraphEvent(event);
+      if (agentEvent) {
+        onEvent(agentEvent);
+      }
+
+      // Capture final response
+      if (event.type === 'complete') {
+        finalResponse = event.data.response;
+      }
+    }
+
+    // Save assistant response to storage
+    if (finalResponse) {
+      this.storage.addMessage(sessionId, 'assistant', finalResponse);
+    }
+
+    onEvent({ type: 'done' });
+  }
+
+  /**
+   * Common error handling logic
+   */
+  private handleError(
+    error: unknown,
+    onEvent: (event: AgentEvent) => void
+  ): void {
+    GraphLogger.error('SYSTEM', 'AgentServiceGraph error', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    onEvent({ type: 'error', message: errorMessage });
+    onEvent({ type: 'done' });
   }
 
   /**

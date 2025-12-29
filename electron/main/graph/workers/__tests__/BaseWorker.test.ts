@@ -4,6 +4,7 @@ import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
 import { DynamicStructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
 import type { GraphStateType } from '../../state';
+import { mockModelResponse } from './test-utils';
 
 // Concrete implementation for testing
 class MockWorker extends BaseWorker {
@@ -39,10 +40,7 @@ describe('BaseWorker', () => {
     worker = new MockWorker();
     
     // Mock the modelWithTools.invoke
-    vi.spyOn((worker as any).modelWithTools, 'invoke').mockResolvedValue(new AIMessage({
-      content: 'Thinking...',
-      tool_calls: []
-    }));
+    mockModelResponse(worker, { content: 'Thinking...' });
   });
 
   afterEach(() => {
@@ -58,14 +56,13 @@ describe('BaseWorker', () => {
   });
 
   it('should execute safe tools immediately', async () => {
-    vi.spyOn((worker as any).modelWithTools, 'invoke').mockResolvedValue(new AIMessage({
-      content: '',
+    mockModelResponse(worker, {
       tool_calls: [{
         name: 'read_file',
         args: { path: 'data' },
         id: 'call-1'
       }]
-    }));
+    });
 
     const state: GraphStateType = { messages: [] } as any;
     const result = await worker.process(state);
@@ -77,14 +74,13 @@ describe('BaseWorker', () => {
   });
 
   it('should return pendingAction for sensitive tools', async () => {
-    vi.spyOn((worker as any).modelWithTools, 'invoke').mockResolvedValue(new AIMessage({
-      content: '',
+    mockModelResponse(worker, {
       tool_calls: [{
         name: 'write_file',
         args: { path: 'test.txt', content: 'hello' },
         id: 'call-2'
       }]
-    }));
+    });
 
     const state: GraphStateType = { messages: [] } as any;
     const result = await worker.process(state);
@@ -113,14 +109,13 @@ describe('BaseWorker', () => {
   });
 
   it('should handle tool errors gracefully', async () => {
-    vi.spyOn((worker as any).modelWithTools, 'invoke').mockResolvedValue(new AIMessage({
-      content: '',
+    mockModelResponse(worker, {
       tool_calls: [{
         name: 'non_existent_tool',
         args: {},
         id: 'call-4'
       }]
-    }));
+    });
 
     const state: GraphStateType = { messages: [] } as any;
     const result = await worker.process(state);

@@ -3,6 +3,7 @@ import { VerbOSGraph } from '../VerbOSGraph';
 import { WORKER_NAMES, NODE_NAMES } from '../state';
 import { HumanMessage, AIMessage, ToolMessage } from '@langchain/core/messages';
 import Database from 'better-sqlite3';
+import { createMockSupervisor } from './test-utils';
 
 describe('VerbOSGraph Integration', () => {
   let db: Database.Database;
@@ -38,19 +39,18 @@ describe('VerbOSGraph Integration', () => {
   });
 
   it('should emit tool_call and tool_result events', async () => {
-    const mockSupervisor = {
-      route: vi.fn()
-        .mockResolvedValueOnce({
-          next: WORKER_NAMES.FILESYSTEM,
-          finalResponse: null,
-          currentWorker: WORKER_NAMES.FILESYSTEM,
-        })
-        .mockResolvedValueOnce({
-          next: NODE_NAMES.END,
-          finalResponse: 'Done',
-          currentWorker: null,
-        }),
-    };
+    const mockSupervisor = createMockSupervisor([
+      {
+        next: WORKER_NAMES.FILESYSTEM,
+        finalResponse: null,
+        currentWorker: WORKER_NAMES.FILESYSTEM,
+      },
+      {
+        next: NODE_NAMES.END,
+        finalResponse: 'Done',
+        currentWorker: null,
+      }
+    ]);
 
     const mockWorker = {
       process: vi.fn().mockResolvedValue({
@@ -82,19 +82,18 @@ describe('VerbOSGraph Integration', () => {
   });
 
   it('should handle HITL: Worker -> Human Approval -> Resume -> Supervisor', async () => {
-    const mockSupervisor = {
-      route: vi.fn()
-        .mockResolvedValueOnce({
-          next: WORKER_NAMES.FILESYSTEM,
-          finalResponse: null,
-          currentWorker: WORKER_NAMES.FILESYSTEM,
-        })
-        .mockResolvedValueOnce({
-          next: NODE_NAMES.END,
-          finalResponse: 'Final response after approval',
-          currentWorker: null,
-        }),
-    };
+    const mockSupervisor = createMockSupervisor([
+      {
+        next: WORKER_NAMES.FILESYSTEM,
+        finalResponse: null,
+        currentWorker: WORKER_NAMES.FILESYSTEM,
+      },
+      {
+        next: NODE_NAMES.END,
+        finalResponse: 'Final response after approval',
+        currentWorker: null,
+      }
+    ]);
 
     const mockWorker = {
       process: vi.fn().mockResolvedValue({
@@ -141,19 +140,18 @@ describe('VerbOSGraph Integration', () => {
   });
 
   it('should handle denyAction correctly', async () => {
-    const mockSupervisor = {
-      route: vi.fn()
-        .mockResolvedValueOnce({
-          next: WORKER_NAMES.FILESYSTEM,
-          finalResponse: null,
-          currentWorker: WORKER_NAMES.FILESYSTEM,
-        })
-        .mockResolvedValueOnce({
-          next: NODE_NAMES.END,
-          finalResponse: 'User denied the action',
-          currentWorker: null,
-        }),
-    };
+    const mockSupervisor = createMockSupervisor([
+      {
+        next: WORKER_NAMES.FILESYSTEM,
+        finalResponse: null,
+        currentWorker: WORKER_NAMES.FILESYSTEM,
+      },
+      {
+        next: NODE_NAMES.END,
+        finalResponse: 'User denied the action',
+        currentWorker: null,
+      }
+    ]);
 
     const mockWorker = {
       process: vi.fn().mockResolvedValue({
