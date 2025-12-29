@@ -1,4 +1,4 @@
-import { normalize, resolve } from 'path';
+import { resolve } from 'path';
 import { realpath } from 'fs/promises';
 import { homedir } from 'os';
 import { promises as fs } from 'fs';

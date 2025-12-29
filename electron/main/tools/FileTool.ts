@@ -45,7 +45,7 @@ export class FileTool {
       
       // Check file size limit
       if (stats.size > MAX_FILE_SIZE) {
-        throw new Error(`File too large (${Math.round(stats.size / 1024)}KB). Maximum allowed size is ${MAX_FILE_SIZE / 1024}KB.`);
+        throw new Error(`Validation Error: File too large (${Math.round(stats.size / 1024)}KB). Maximum allowed size is ${MAX_FILE_SIZE / 1024}KB.`);
       }
       
       const content = await fs.readFile(validatedPath, encoding as BufferEncoding);
@@ -66,12 +66,40 @@ export class FileTool {
       const bufferEncoding = Buffer.byteLength(content, encoding as BufferEncoding);
       // Check content size limit
       if (bufferEncoding > MAX_WRITE_SIZE) {
-        throw new Error(`Content too large (${Math.round(bufferEncoding / 1024)}KB). Maximum allowed size is ${MAX_WRITE_SIZE / 1024}KB.`);
+        throw new Error(`Validation Error: Content too large (${Math.round(bufferEncoding / 1024)}KB). Maximum allowed size is ${MAX_WRITE_SIZE / 1024}KB.`);
       }
       
       const validatedPath = await validateWritePath(path);
       await fs.writeFile(validatedPath, content, encoding as BufferEncoding);
       return `Successfully wrote to file: ${validatedPath}`;
+    },
+  });
+
+  static createDirectory = new DynamicStructuredTool({
+    name: 'create_directory',
+    description: 'Create a new directory.',
+    schema: z.object({
+      path: z.string().describe('The absolute path of the directory to create'),
+    }),
+    func: async ({ path }) => {
+      // Errors will be caught by the AgentService
+      const validatedPath = await validateWritePath(path);
+      await fs.mkdir(validatedPath, { recursive: true });
+      return `Successfully created directory: ${validatedPath}`;
+    },
+  });
+
+  static deleteFile = new DynamicStructuredTool({
+    name: 'delete_file',
+    description: 'Delete a file from the file system. Use with caution.',
+    schema: z.object({
+      path: z.string().describe('The absolute path of the file to delete'),
+    }),
+    func: async ({ path }) => {
+      // Errors will be caught by the AgentService
+      const validatedPath = await validateReadPath(path);
+      await fs.unlink(validatedPath);
+      return `Successfully deleted file: ${validatedPath}`;
     },
   });
 
@@ -83,6 +111,8 @@ export class FileTool {
       this.listDirectory,
       this.readFile,
       this.writeFile,
+      this.createDirectory,
+      this.deleteFile,
     ];
   }
 }
