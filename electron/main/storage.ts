@@ -3,13 +3,14 @@ import { join } from 'path';
 import Database from 'better-sqlite3';
 import { v4 as uuidv4 } from 'uuid';
 import type { Message, ChatSession, ChatSummary } from '../../src/types/verbos';
+import { GraphLogger } from './graph/logger';
 
 export class StorageService {
-  private db: Database.Database;
+  public readonly db: Database.Database;
 
   constructor() {
     const dbPath = join(app.getPath('userData'), 'verbos.db');
-    console.log(`[StorageService] Initializing database at: ${dbPath}`);
+    GraphLogger.info('SYSTEM', `Initializing database at: ${dbPath}`);
 
     this.db = new Database(dbPath);
     this.db.pragma('foreign_keys = ON');
@@ -40,7 +41,7 @@ export class StorageService {
       CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id);
       CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(session_id, timestamp);
     `);
-    console.log('[StorageService] Database tables initialized');
+    GraphLogger.info('SYSTEM', 'Database tables initialized');
   }
 
   private migrateFromJSON(): void {
@@ -49,7 +50,7 @@ export class StorageService {
       const oldPath = join(app.getPath('userData'), 'verbos-history.json');
 
       if (existsSync(oldPath)) {
-        console.log('[StorageService] Found legacy JSON file, migrating...');
+        GraphLogger.info('SYSTEM', 'Found legacy JSON file, migrating...');
         const data = JSON.parse(readFileSync(oldPath, 'utf-8'));
 
         if (data.sessions) {
@@ -77,15 +78,15 @@ export class StorageService {
             }
           }
 
-          console.log(`[StorageService] Migrated ${sessionCount} sessions from JSON`);
+          GraphLogger.info('SYSTEM', `Migrated ${sessionCount} sessions from JSON`);
         }
 
         // Archive the old file
         renameSync(oldPath, join(app.getPath('userData'), 'verbos-history.json.backup'));
-        console.log('[StorageService] Legacy file archived');
+        GraphLogger.info('SYSTEM', 'Legacy file archived');
       }
     } catch (error) {
-      console.error('[StorageService] Migration failed (non-fatal):', error);
+      GraphLogger.error('SYSTEM', 'Migration failed (non-fatal)', error);
     }
   }
 
@@ -104,7 +105,7 @@ export class StorageService {
       VALUES (?, ?, ?, ?, ?)
     `).run(session.id, session.title, '', now, now);
 
-    console.log(`[StorageService] Created session: ${session.id}`);
+    GraphLogger.info('SYSTEM', `Created session: ${session.id}`);
     return session;
   }
 
@@ -194,7 +195,7 @@ export class StorageService {
       DELETE FROM sessions WHERE id = ?
     `).run(id);
 
-    console.log(`[StorageService] Deleted session: ${id}`);
+    GraphLogger.info('SYSTEM', `Deleted session: ${id}`);
     return result.changes > 0;
   }
 
