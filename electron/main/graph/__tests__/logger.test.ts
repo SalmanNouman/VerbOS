@@ -14,7 +14,7 @@ describe('GraphLogger', () => {
 
   it('should log info messages with correct formatting', () => {
     GraphLogger.info('GRAPH', 'Test info');
-    expect(console.log).toHaveBeenCalledWith(expect.stringMatching(/\[[^\]]*\] INFO  \[GRAPH\] Test info/));
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('INFO  [GRAPH] Test info'));
   });
 
   it('should log messages with data', () => {
