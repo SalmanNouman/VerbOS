@@ -1,13 +1,13 @@
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import { ChatOllama } from "@langchain/ollama";
 import { StructuredToolInterface } from "@langchain/core/tools";
-import { HumanMessage, SystemMessage, AIMessage, ToolMessage, BaseMessage } from "@langchain/core/messages";
+import { HumanMessage, SystemMessage, ToolMessage, BaseMessage } from "@langchain/core/messages";
 import { FileTool } from "./tools/FileTool";
 import { SystemTool } from "./tools/SystemTool";
 import { StorageService } from "./storage";
 import { homedir } from 'os';
 import { join } from 'path';
-import type { Message } from '../../src/types/verbos';
+import { GraphLogger } from './graph/logger';
 
 interface SmartContextConfig {
   maxRecentMessages: number;
@@ -48,7 +48,7 @@ export class AgentService {
     this.tools = [...FileTool.getTools(), ...SystemTool.getTools()];
     this.modelWithTools = this.chatModel.bindTools(this.tools);
 
-    console.log(`[AgentService] Initialized (Chat: Gemini, Summary: Ollama ${this.config.localModelName})`);
+    GraphLogger.info('SYSTEM', `Initialized AgentService (Chat: Gemini, Summary: Ollama ${this.config.localModelName})`);
   }
 
   /**
@@ -88,9 +88,9 @@ Concise summary:`;
         : JSON.stringify(summaryResponse.content);
 
       this.storage.updateSummary(sessionId, newSummary);
-      console.log(`[AgentService] Updated summary for session ${sessionId}`);
+      GraphLogger.info('SYSTEM', `Updated summary for session ${sessionId}`);
     } catch (error) {
-      console.error('[AgentService] Local summarization failed (non-fatal):', error);
+      GraphLogger.error('SYSTEM', 'Local summarization failed (non-fatal)', error);
       // Summarization failure is non-fatal; we continue with raw message history
     }
   }
@@ -98,7 +98,7 @@ Concise summary:`;
   clearSession(sessionId: string): void {
     // With persistent storage, "clearing" just means we don't need to do anything here
     // The session remains in the database. If we wanted to clear memory, we'd delete from storage.
-    console.log(`[AgentService] Session ${sessionId} cleared from memory (persisted in DB)`);
+    GraphLogger.info('SYSTEM', `Session ${sessionId} cleared from memory (persisted in DB)`);
   }
 
   private buildSystemInstructions(sessionId: string): string {
@@ -190,7 +190,7 @@ Concise summary:`;
 
           // Trigger summarization if needed (async, non-blocking)
           this.updateMemory(sessionId).catch(err =>
-            console.error('[AgentService] Background summarization failed:', err)
+            GraphLogger.error('SYSTEM', 'Background summarization failed', err)
           );
 
           break;
@@ -203,7 +203,7 @@ Concise summary:`;
         assistantResponse = fallbackMsg;
       }
     } catch (error) {
-      console.error("AgentService.ask Error:", error);
+      GraphLogger.error('SYSTEM', 'AgentService.ask Error', error);
       const errorMsg = "\n\nCommunication failure. Ensure your API keys and local Ollama instance are active.";
       onToken(errorMsg);
     }
