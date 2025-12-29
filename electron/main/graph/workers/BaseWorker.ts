@@ -2,7 +2,7 @@ import { ChatGoogleGenerativeAI } from '@langchain/google-genai';
 import { ChatOllama } from '@langchain/ollama';
 import type { StructuredToolInterface } from '@langchain/core/tools';
 import type { BaseMessage } from '@langchain/core/messages';
-import { AIMessage, ToolMessage } from '@langchain/core/messages';
+import { AIMessage, ToolMessage, SystemMessage } from '@langchain/core/messages';
 import type { GraphStateType, PendingAction } from '../state';
 import { getCommandSensitivity } from '../../tools/ShellTool';
 import { GraphLogger } from '../logger';
@@ -117,7 +117,10 @@ export abstract class BaseWorker {
    * If a sensitive action is detected, returns a pending action for HITL.
    */
   async process(state: GraphStateType): Promise<WorkerResult> {
-    const messages = [...state.messages];
+    const messages: BaseMessage[] = [
+      new SystemMessage(this.systemPrompt),
+      ...state.messages,
+    ];
     GraphLogger.debug('WORKER', `Worker ${this.name} processing ${messages.length} messages`);
 
     try {
@@ -128,15 +131,15 @@ export abstract class BaseWorker {
       // Check for tool calls
       if (response.tool_calls && response.tool_calls.length > 0) {
         for (const toolCall of response.tool_calls) {
-          GraphLogger.info('TOOL', `Worker ${this.name} calling tool: ${toolCall.name}`, toolCall.args);
-          
+          GraphLogger.info('TOOL', `Worker ${this.name} calling tool: ${toolCall.name}`, toolCall.args);    
+
           if (!toolCall.id) {
             GraphLogger.warn('TOOL', `Tool call ${toolCall.name} missing ID, generating one`);
             toolCall.id = crypto.randomUUID();
           }
 
           const tool = this.tools.find(t => t.name === toolCall.name);
-          
+
           if (!tool) {
             const errorMsg = `Error: Tool ${toolCall.name} not found`;
             GraphLogger.error('TOOL', errorMsg);
@@ -148,8 +151,8 @@ export abstract class BaseWorker {
           }
 
           // Check sensitivity for HITL
-          const sensitivity = getToolSensitivity(toolCall.name, toolCall.args as Record<string, unknown>);
-          
+          const sensitivity = getToolSensitivity(toolCall.name, toolCall.args as Record<string, unknown>);  
+
           if (sensitivity === 'sensitive') {
             GraphLogger.info('WORKER', `Sensitive action detected for ${toolCall.name}, awaiting approval`);
             // Return pending action for user approval
@@ -159,7 +162,7 @@ export abstract class BaseWorker {
               toolName: toolCall.name,
               toolArgs: toolCall.args as Record<string, unknown>,
               sensitivity,
-              description: this.describeAction(toolCall.name, toolCall.args as Record<string, unknown>),
+              description: this.describeAction(toolCall.name, toolCall.args as Record<string, unknown>),    
             };
 
             return {
@@ -209,9 +212,9 @@ export abstract class BaseWorker {
    * Execute a pending action after user approval
    */
   async executePendingAction(action: PendingAction): Promise<BaseMessage[]> {
-    GraphLogger.info('WORKER', `Executing pending action: ${action.toolName} for worker ${this.name}`);
+    GraphLogger.info('WORKER', `Executing pending action: ${action.toolName} for worker ${this.name}`);     
     const tool = this.tools.find(t => t.name === action.toolName);
-    
+
     if (!tool) {
       return [new ToolMessage({
         tool_call_id: action.id,
