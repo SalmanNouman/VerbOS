@@ -119,8 +119,8 @@ A local LLM (Ollama) acts as a privacy mediator. It sanitizes context and summar
 - [x] **Phase 3: The Hands** - Core OS tools (FileTool, SystemTool).
 - [x] **Phase 4: Persistence** - SQLite session management and smart context.
 - [x] **Phase 5: Polish for Alpha version** - UI Polish, session switching.
-- [ ] **Phase 6** - Quality improvements, enhanced error handling, and more tools.
-- [ ] **Phase 7** - Better agentic model orchestration.
+- [x] **Phase 6** - Quality improvements, enhanced error handling, and more tools.
+- [x] **Phase 7** - Better agentic model orchestration.
 - [ ] **Current Focus** - Parallel agents, Workspace Instances.
 - [ ] **Future Focus** - Settings, Preferences, and other user facing switches.
 
