@@ -109,25 +109,39 @@ ipcMain.handle('ask-agent', async (event, { sessionId, prompt }: { sessionId: st
 
 // Approval handlers for HITL
 ipcMain.handle('agent:approve', async (_event, sessionId: string) => {
-  if (!agentService) throw new Error('AgentService not initialized');
-  await agentService.approveAction(sessionId);
-  return { success: true };
+  try{
+    if (!agentService) throw new Error('AgentService not initialized');
+    await agentService.approveAction(sessionId);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+  }
 });
 
 ipcMain.handle('agent:deny', async (_event, sessionId: string, reason?: string) => {
-  if (!agentService) throw new Error('AgentService not initialized');
-  await agentService.denyAction(sessionId, reason);
-  return { success: true };
+  try{
+    if (!agentService) throw new Error('AgentService not initialized');
+    await agentService.denyAction(sessionId, reason);
+    return { success: true };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+  }
 });
 
 ipcMain.handle('agent:resume', async (event, sessionId: string) => {
   if (!agentService) throw new Error('AgentService not initialized');
-  
-  await agentService.resume(sessionId, (agentEvent: AgentEvent) => {
-    event.sender.send('agent-event', agentEvent);
-  });
-  
-  event.sender.send('stream-end');
+  try {
+    await agentService.resume(sessionId, (agentEvent: AgentEvent) => {
+      event.sender.send('agent-event', agentEvent);
+    });
+  } catch (error) {
+    event.sender.send('agent-event', {
+      type: 'error',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    });
+  } finally {
+    event.sender.send('stream-end');
+  }
   return { streaming: true };
 });
 

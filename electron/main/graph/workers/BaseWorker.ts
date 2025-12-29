@@ -44,6 +44,9 @@ export function getToolSensitivity(
   // Shell commands
   if (toolName === 'execute_shell_command') {
     const command = toolArgs.command as string;
+    if (typeof command !== 'string' || !command) {
+      return 'sensitive'; // Treat malformed commands as sensitive
+    }
     return getCommandSensitivity(command);
   }
 
@@ -88,9 +91,13 @@ export abstract class BaseWorker {
         baseUrl: 'http://localhost:11434',
       });
     } else {
+      const apiKey = process.env.GOOGLE_API_KEY;
+      if (!apiKey) {
+        throw new Error('GOOGLE_API_KEY environment variable is not set');
+      }
       this.model = new ChatGoogleGenerativeAI({
         model: 'gemini-2.0-flash',
-        apiKey: process.env.GOOGLE_API_KEY,
+        apiKey,
       });
     }
 

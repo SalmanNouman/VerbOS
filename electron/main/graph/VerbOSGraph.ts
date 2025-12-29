@@ -9,6 +9,7 @@ import {
   CodeWorker,
   BaseWorker,
 } from './workers';
+import {ToolMessage} from '@langchain/core/messages';
 import { SQLiteCheckpointer } from './SQLiteCheckpointer';
 import type Database from 'better-sqlite3';
 
@@ -357,7 +358,7 @@ export class VerbOSGraph {
         }
         
         // Tool results (from ToolMessage)
-        if (msg._getType() === 'tool' || (msg.constructor && msg.constructor.name === 'ToolMessage')) {
+        if (msg instanceof ToolMessage) {
           events.push({
             type: 'tool_result',
             data: {

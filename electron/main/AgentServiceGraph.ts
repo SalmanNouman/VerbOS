@@ -135,13 +135,14 @@ export class AgentServiceGraph {
         };
 
       case 'tool_call':
+      {
         const toolNames = event.data.tools.map(t => t.name).join(', ');
         return {
           type: 'tool',
           message: `Using tools: ${toolNames}`,
           tools: event.data.tools,
         };
-
+      }
       case 'tool_result':
         return {
           type: 'tool_result',
