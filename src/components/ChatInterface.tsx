@@ -4,24 +4,33 @@ import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import {
-  Send,
-  Bot,
-  User,
   Sparkles,
   ArrowUp,
   Command,
   Loader2,
   Terminal,
   Cpu,
-  ShieldCheck,
   RefreshCw,
-  AlertCircle
+  AlertCircle,
+  CheckCircle,
+  XCircle,
+  AlertTriangle,
+  Wrench,
+  ChevronDown,
+  ChevronRight,
+  Brain
 } from 'lucide-react';
-import type { ChatSession, Message } from '../types/verbos';
+import type { ChatSession, Message, AgentEvent, PendingAction } from '../types/verbos';
 
 interface ChatInterfaceProps {
   currentSession: ChatSession | null;
   onUpdateTitle: (sessionId: string, title: string) => Promise<void>;
+}
+
+interface ToolLog {
+  name: string;
+  args: any;
+  result?: string;
 }
 
 export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfaceProps) {
@@ -29,6 +38,12 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [lastInput, setLastInput] = useState('');
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+  const [toolLogs, setToolLogs] = useState<ToolLog[]>([]);
+  const [showToolLogs, setShowToolLogs] = useState(false);
+  const [agentState, setAgentState] = useState<'thinking' | 'executing' | 'idle'>('idle');
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -38,10 +53,8 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages, isLoading]);
+  }, [messages, isLoading, toolLogs, statusMessage]);
 
-  // Only update messages when the session ID changes to prevent flickering
-  // caused by parent component updates (like title changes) resetting local state
   useEffect(() => {
     if (currentSession) {
       setMessages(currentSession.messages);
@@ -50,54 +63,174 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
     }
   }, [currentSession?.id]);
 
+  const handleAgentEvent = (event: AgentEvent) => {
+    switch (event.type) {
+      case 'status':
+        setStatusMessage(event.message);
+        setAgentState('thinking');
+        break;
+      case 'tool':
+        setStatusMessage(event.message); // "Using tools: ..."
+        setAgentState('executing');
+        if (event.tools) {
+          const newLogs = event.tools.map(t => ({ name: t.name, args: t.args }));
+          setToolLogs(prev => [...prev, ...newLogs]);
+        }
+        break;
+      case 'tool_result':
+        setToolLogs(prev => {
+          const copy = [...prev];
+          const last = copy[copy.length - 1];
+          if (last && !last.result) {
+            last.result = event.message;
+          }
+          return copy;
+        });
+        break;
+      case 'response':
+        setMessages(prev => {
+          const updated = [...prev];
+          const lastMsg = updated[updated.length - 1];
+
+          // Check if we need to append a new message or update existing
+          if (lastMsg && lastMsg.role === 'assistant') {
+            updated[updated.length - 1] = { ...lastMsg, content: event.message };
+          } else {
+            updated.push({ role: 'assistant', content: event.message });
+          }
+          return updated;
+        });
+        setStatusMessage(null);
+        setAgentState('idle');
+        break;
+      case 'approval_required':
+        setPendingAction(event.action);
+        setStatusMessage(null);
+        setIsLoading(false); // Paused waiting for user
+        setAgentState('idle');
+        break;
+      case 'error':
+        setMessages(prev => {
+          const updated = [...prev];
+          const lastMsg = updated[updated.length - 1];
+          if (lastMsg && lastMsg.role === 'assistant') {
+            updated[updated.length - 1] = { ...lastMsg, content: `Error: ${event.message}` };
+          } else {
+            updated.push({ role: 'assistant', content: `Error: ${event.message}` });
+          }
+          return updated;
+        });
+        setStatusMessage(null);
+        setAgentState('idle');
+        break;
+      case 'done':
+        setIsLoading(false);
+        setStatusMessage(null);
+        setAgentState('idle');
+        break;
+    }
+  };
+
   const sendMessage = async (text: string) => {
     if (!currentSession) return;
 
     setIsLoading(true);
-    const assistantMsg: Message = {
-      role: 'assistant',
-      content: '',
-    };
-    setMessages(prev => [...prev, assistantMsg]);
+    setStatusMessage('Thinking...');
+    setAgentState('thinking');
+    setToolLogs([]);
+    setShowToolLogs(false);
 
     try {
       if (window.verbos && window.verbos.askAgent) {
-        window.verbos.onToken((token: string) => {
-          setMessages(prev => {
-            const updated = [...prev];
-            const lastMsg = updated[updated.length - 1];
-            if (lastMsg && lastMsg.role === 'assistant') {
-              updated[updated.length - 1] = { ...lastMsg, content: lastMsg.content + token };
-            }
-            return updated;
-          });
-        });
+        window.verbos.onAgentEvent(handleAgentEvent);
 
         window.verbos?.onStreamEnd(async () => {
           setIsLoading(false);
-          window.verbos?.removeTokenListener();
+          setStatusMessage(null);
+          setAgentState('idle');
+          window.verbos?.removeAgentEventListener();
           window.verbos?.removeStreamEndListener();
         });
 
         await window.verbos.askAgent(currentSession.id, text);
       } else {
+        // Fallback for dev/demo without backend
         setTimeout(async () => {
-          setMessages(prev => {
-            const updated = [...prev];
-            updated[updated.length - 1] = { ...updated[updated.length - 1], content: `I received: "${text}". Connect to VerbOS backend for full functionality.` };
-            return updated;
-          });
+          setMessages(prev => [...prev, {
+            role: 'assistant',
+            content: `I received: "${text}". Connect to VerbOS backend for full functionality.`
+          }]);
           setIsLoading(false);
+          setAgentState('idle');
         }, 800);
       }
     } catch (error) {
       console.error('Agent error:', error);
-      setMessages(prev => {
-        const updated = [...prev];
-        updated[updated.length - 1] = { ...updated[updated.length - 1], content: `Error: Failed to contact agent. Please ensure the backend is running.` };
-        return updated;
-      });
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: `Error: Failed to contact agent. Please ensure the backend is running.`
+      }]);
       setIsLoading(false);
+      setStatusMessage(null);
+      setAgentState('idle');
+    }
+  };
+
+  const handleApprove = async () => {
+    if (!currentSession || !pendingAction) return;
+
+    setIsLoading(true);
+    setPendingAction(null);
+    setStatusMessage('Executing approved action...');
+    setAgentState('executing');
+
+    try {
+      await window.verbos?.approveAction(currentSession.id);
+
+      window.verbos?.onAgentEvent(handleAgentEvent);
+      window.verbos?.onStreamEnd(() => {
+        setIsLoading(false);
+        setStatusMessage(null);
+        setAgentState('idle');
+        window.verbos?.removeAgentEventListener();
+        window.verbos?.removeStreamEndListener();
+      });
+
+      await window.verbos?.resumeAgent(currentSession.id);
+    } catch (error) {
+      console.error('Approval error:', error);
+      setIsLoading(false);
+      setStatusMessage(null);
+      setAgentState('idle');
+    }
+  };
+
+  const handleDeny = async () => {
+    if (!currentSession || !pendingAction) return;
+
+    setIsLoading(true);
+    setPendingAction(null);
+    setStatusMessage('Action denied, continuing...');
+    setAgentState('thinking');
+
+    try {
+      await window.verbos?.denyAction(currentSession.id, 'User denied the action');
+
+      window.verbos?.onAgentEvent(handleAgentEvent);
+      window.verbos?.onStreamEnd(() => {
+        setIsLoading(false);
+        setStatusMessage(null);
+        setAgentState('idle');
+        window.verbos?.removeAgentEventListener();
+        window.verbos?.removeStreamEndListener();
+      });
+
+      await window.verbos?.resumeAgent(currentSession.id);
+    } catch (error) {
+      console.error('Deny error:', error);
+      setIsLoading(false);
+      setStatusMessage(null);
+      setAgentState('idle');
     }
   };
 
@@ -227,26 +360,124 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
               );
             })}
 
-            {isLoading && messages[messages.length - 1]?.role === 'assistant' && messages[messages.length - 1]?.content === '' && (
+            {/* Loading/Status/Reasoning Indicator */}
+            {isLoading && (
               <div className="flex justify-start">
-                <div className="bg-surface-raised border border-border/50 px-4 py-3 rounded-2xl shadow-md">
+                <div className="bg-surface-raised border border-border/50 px-4 py-3 rounded-2xl shadow-md w-full max-w-xl">
+                  {/* Status Header */}
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-lg bg-brand-primary/10 flex items-center justify-center">
-                      <Bot size={16} className="text-brand-primary animate-pulse" />
+                      {agentState === 'thinking' ? (
+                        <Brain size={16} className="text-brand-primary animate-pulse" />
+                      ) : (
+                        <Terminal size={16} className="text-brand-accent animate-pulse" />
+                      )}
                     </div>
-                    <div>
-                      <div className="text-[10px] font-semibold text-brand-primary uppercase tracking-wider mb-1">Thinking</div>
+                    <div className="flex-1">
+                      <div className={`text-[10px] font-semibold uppercase tracking-wider mb-1 ${agentState === 'thinking' ? 'text-brand-primary' : 'text-brand-accent'}`}>
+                        {statusMessage || 'Processing'}
+                      </div>
                       <div className="flex gap-1">
-                        <div className="w-1.5 h-1.5 bg-brand-primary/60 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                        <div className="w-1.5 h-1.5 bg-brand-primary/60 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                        <div className="w-1.5 h-1.5 bg-brand-primary/60 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                        <div className={`w-1.5 h-1.5 rounded-full animate-bounce ${agentState === 'thinking' ? 'bg-brand-primary/60' : 'bg-brand-accent/60'}`} style={{ animationDelay: '0ms' }} />
+                        <div className={`w-1.5 h-1.5 rounded-full animate-bounce ${agentState === 'thinking' ? 'bg-brand-primary/60' : 'bg-brand-accent/60'}`} style={{ animationDelay: '150ms' }} />
+                        <div className={`w-1.5 h-1.5 rounded-full animate-bounce ${agentState === 'thinking' ? 'bg-brand-primary/60' : 'bg-brand-accent/60'}`} style={{ animationDelay: '300ms' }} />
                       </div>
                     </div>
+                    {toolLogs.length > 0 && (
+                      <button
+                        onClick={() => setShowToolLogs(!showToolLogs)}
+                        className="flex items-center gap-1 text-[10px] text-text-muted hover:text-text-primary px-2 py-1 rounded-md hover:bg-surface-overlay transition-colors"
+                      >
+                        {showToolLogs ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                        {showToolLogs ? 'Hide Reasoning' : 'View Reasoning'}
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Collapsible Tool Logs */}
+                  {showToolLogs && toolLogs.length > 0 && (
+                    <div className="mt-3 pt-3 border-t border-border/30 space-y-3 animate-in fade-in slide-in-from-top-1">
+                      {toolLogs.map((log, i) => (
+                        <div key={i} className="text-xs">
+                          <div className="flex items-center gap-2 text-text-dim mb-1 font-mono">
+                            <ChevronRight size={10} />
+                            <span className="font-semibold text-brand-secondary">{log.name}</span>
+                          </div>
+                          <div className="pl-4 border-l-2 border-border/30 ml-1 space-y-1">
+                            <pre className="bg-background/50 p-2 rounded text-[10px] text-text-secondary overflow-x-auto">
+                              {JSON.stringify(log.args, null, 2)}
+                            </pre>
+                            {log.result && (
+                              <div className="mt-1">
+                                <div className="text-[10px] text-green-500/80 mb-0.5">Result:</div>
+                                <pre className="bg-background/50 p-2 rounded text-[10px] text-text-secondary overflow-x-auto max-h-32">
+                                  {log.result.length > 300 ? log.result.slice(0, 300) + '...' : log.result}
+                                </pre>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* HITL Approval Card */}
+            {pendingAction && !isLoading && (
+              <div className="flex justify-start animate-in fade-in slide-in-from-bottom-2">
+                <div className="bg-amber-500/5 border border-amber-500/30 px-5 py-4 rounded-2xl shadow-lg max-w-md w-full">
+                  <div className="flex items-start gap-3 mb-4">
+                    <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center flex-shrink-0">
+                      <AlertTriangle size={20} className="text-amber-500" />
+                    </div>
+                    <div>
+                      <div className="text-xs font-semibold text-amber-500 uppercase tracking-wider mb-1">
+                        Approval Required
+                      </div>
+                      <p className="text-sm text-text-primary font-medium">
+                        {pendingAction.description}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="bg-background/50 rounded-lg p-3 mb-4 border border-border/30">
+                    <div className="flex items-center gap-2 text-xs text-text-muted mb-2">
+                      <Wrench size={12} />
+                      <span className="font-medium">{pendingAction.toolName}</span>
+                      <span className="text-text-dim">by {pendingAction.workerName.replace('_worker', '')}</span>
+                    </div>
+                    <div className="relative group">
+                      <pre
+                        className="text-xs text-text-secondary overflow-x-auto whitespace-pre-wrap break-all max-h-32 overflow-y-auto custom-scrollbar"
+                        title={JSON.stringify(pendingAction.toolArgs, null, 2)}
+                      >
+                        {JSON.stringify(pendingAction.toolArgs, null, 2)}
+                      </pre>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-3">
+                    <button
+                      onClick={handleApprove}
+                      className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-green-500/10 hover:bg-green-500/20 border border-green-500/30 rounded-xl text-sm font-medium text-green-500 transition-all active:scale-95"
+                    >
+                      <CheckCircle size={16} />
+                      Approve
+                    </button>
+                    <button
+                      onClick={handleDeny}
+                      className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 rounded-xl text-sm font-medium text-red-500 transition-all active:scale-95"
+                    >
+                      <XCircle size={16} />
+                      Deny
+                    </button>
                   </div>
                 </div>
               </div>
             )}
-            
+
             {/* Retry Button */}
             {!isLoading && messages.length > 0 && isErrorMessage(messages[messages.length - 1].content) && (
               <div className="flex justify-center mt-4 animate-in fade-in slide-in-from-bottom-2">
@@ -307,4 +538,3 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
     </div>
   );
 }
-
