@@ -1,9 +1,10 @@
 import { ChatGoogleGenerativeAI } from '@langchain/google-genai';
 import { BaseChatModel } from '@langchain/core/language_models/chat_models';
-import { SystemMessage, HumanMessage } from '@langchain/core/messages';
+import { SystemMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
+import type { BaseMessage } from '@langchain/core/messages';
 import { z } from 'zod';
 import type { GraphStateType } from './state';
-import { WORKER_NAMES, NODE_NAMES, MAX_ITERATIONS } from './state';
+import { WORKER_NAMES, NODE_NAMES, MAX_ITERATIONS, MAX_TOOL_OUTPUT_LENGTH, MAX_MESSAGES_FOR_SUPERVISOR } from './state';
 import { homedir } from 'os';
 import { platform } from 'os';
 import { GraphLogger } from './logger';
@@ -34,7 +35,7 @@ export class Supervisor {
 
   constructor(model?: BaseChatModel) {
     this.model = model || new ChatGoogleGenerativeAI({
-      model: 'gemini-2.0-flash',
+      model: 'gemini-2.5-flash',
       apiKey: process.env.GOOGLE_API_KEY,
     });
   }
@@ -98,9 +99,18 @@ Analyze the conversation history to understand:
       };
     }
 
+    // Filter and prune messages for supervisor context
+    const filteredMessages = this.filterMessagesForSupervisor(state.messages);
+    const prunedMessages = this.pruneMessages(filteredMessages, MAX_MESSAGES_FOR_SUPERVISOR);
+    
+    // Prepend task summary if available
+    const contextMessages = state.taskSummary 
+      ? [new HumanMessage(`[Previous Task Summary]: ${state.taskSummary}`), ...prunedMessages]
+      : prunedMessages;
+
     const messages = [
       new SystemMessage(this.buildSystemPrompt()),
-      ...state.messages,
+      ...contextMessages,
       new HumanMessage('Based on the conversation above, decide the next action. If the task is complete, provide a final response.'),
     ];
 
@@ -133,5 +143,36 @@ Analyze the conversation history to understand:
         currentWorker: null,
       };
     }
+  }
+
+  /**
+   * Filter messages for supervisor context by truncating verbose tool outputs
+   */
+  private filterMessagesForSupervisor(messages: BaseMessage[]): BaseMessage[] {
+    return messages.map(msg => {
+      if (msg instanceof ToolMessage) {
+        const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+        // Truncate verbose tool outputs
+        if (content.length > MAX_TOOL_OUTPUT_LENGTH) {
+          return new ToolMessage({
+            tool_call_id: msg.tool_call_id,
+            content: content.substring(0, MAX_TOOL_OUTPUT_LENGTH) + '... [truncated]',
+          });
+        }
+      }
+      return msg;
+    });
+  }
+
+  /**
+   * Prune messages to prevent context overflow, keeping most recent messages
+   */
+  private pruneMessages(messages: BaseMessage[], maxCount: number): BaseMessage[] {
+    if (messages.length <= maxCount) {
+      return messages;
+    }
+    
+    // Keep the most recent messages
+    return messages.slice(-maxCount);
   }
 }
