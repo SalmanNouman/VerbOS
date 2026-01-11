@@ -4,6 +4,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import { platform } from 'os';
 import { GraphLogger } from '../graph/logger';
+import { validateDirectoryPath } from './pathValidation';
 
 const execAsync = promisify(exec);
 
@@ -25,10 +26,6 @@ const SHELL_SECURITY_CONFIG = {
     'ping',
     'curl',
     'wget',
-    // System info (safe, read-only)
-    'node',
-    'python',
-    'pip',
     // Directory listing (read-only)
     'ls',
     'dir',
@@ -43,6 +40,15 @@ const SHELL_SECURITY_CONFIG = {
   ],
   // Blocked patterns that should never be allowed even within whitelisted commands
   blockedPatterns: [
+    // Command substitution and chaining (must be checked first)
+    /\$\(/i,           // $(...) command substitution
+    /`[^`]*`/,         // backtick command substitution
+    /;/,               // command separator
+    /&&/,              // AND chaining
+    /\|\|/,            // OR chaining
+    /\|/,              // pipe (can chain to dangerous commands)
+    /\n/,              // newline command separator
+    // Dangerous operations
     /rm\s+-rf/i,
     /del\s+\/[sfq]/i,
     /format\s+/i,
@@ -124,10 +130,10 @@ export function getCommandSensitivity(command: string): 'safe' | 'moderate' | 's
   const commandBase = trimmedCommand.split(/\s+/)[0];
 
   // Safe commands (read-only, no side effects)
-  const safeCommands = ['ls', 'dir', 'cat', 'type', 'echo', 'pwd', 'ps', 'tasklist', 'whoami', 'ping', 'node', 'python'];
+  const safeCommands = ['ls', 'dir', 'cat', 'type', 'echo', 'pwd', 'ps', 'tasklist', 'whoami', 'ping'];
   if (safeCommands.includes(commandBase)) {
-    // Check if it's truly read-only (no redirects, pipes to dangerous commands)
-    if (!trimmedCommand.includes('>') && !trimmedCommand.includes('|')) {
+    // Check if it's truly read-only (no redirects)
+    if (!trimmedCommand.includes('>')) {
       return 'safe';
     }
   }
@@ -187,7 +193,15 @@ export class ShellTool {
         };
 
         if (cwd) {
-          options.cwd = cwd;
+          // Validate cwd against allowed paths
+          try {
+            await validateDirectoryPath(cwd);
+            options.cwd = cwd;
+          } catch (error) {
+            const errorMsg = error instanceof Error ? error.message : String(error);
+            GraphLogger.error('TOOL', `Invalid cwd path: ${cwd} - ${errorMsg}`);
+            throw new Error(`Security Violation: Working directory '${cwd}' is not allowed. ${errorMsg}`);
+          }
         }
 
         // Use appropriate shell based on platform
