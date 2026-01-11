@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { CodeWorker } from '../CodeWorker';
-import { AIMessage, ToolMessage } from '@langchain/core/messages';
+import { ToolMessage } from '@langchain/core/messages';
 import type { GraphStateType } from '../../state';
 import { mockModelResponse } from './test-utils';
 

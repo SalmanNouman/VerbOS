@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { FileSystemWorker } from '../FileSystemWorker';
-import { AIMessage } from '@langchain/core/messages';
 import type { GraphStateType } from '../../state';
 import { mockModelResponse } from './test-utils';
 
