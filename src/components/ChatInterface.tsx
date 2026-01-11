@@ -161,6 +161,7 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
             content: `I received: "${text}". Connect to VerbOS backend for full functionality.`
           }]);
           setIsLoading(false);
+          setStatusMessage(null);
           setAgentState('idle');
         }, 800);
       }
