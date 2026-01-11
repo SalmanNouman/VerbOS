@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { VerbOSGraph } from '../VerbOSGraph';
-import { WORKER_NAMES, NODE_NAMES } from '../state';
+import { WORKER_NAMES, NODE_NAMES, MAX_WORKER_ITERATIONS } from '../state';
 import { HumanMessage, AIMessage, ToolMessage } from '@langchain/core/messages';
 import Database from 'better-sqlite3';
 import { createMockSupervisor } from './test-utils';
@@ -189,5 +189,140 @@ describe('VerbOSGraph Integration', () => {
     // In our mock routing, the last message might be from the user (denial) or assistant (final response)
     // LangGraph's stream includes the state updates.
     expect(messages.some((m: any) => m.content.includes('too risky'))).toBe(true);
+  });
+
+  it('should support worker self-loop when taskComplete is false', async () => {
+    let workerCallCount = 0;
+    
+    const mockSupervisor = createMockSupervisor([
+      {
+        next: WORKER_NAMES.CODE,
+        finalResponse: null,
+        currentWorker: WORKER_NAMES.CODE,
+      },
+      {
+        next: NODE_NAMES.END,
+        finalResponse: 'Code worker completed multi-step task',
+        currentWorker: null,
+      }
+    ]);
+
+    const mockWorker = {
+      process: vi.fn().mockImplementation(() => {
+        workerCallCount++;
+        // First call: not complete (will self-loop)
+        // Second call: complete (will return to supervisor)
+        if (workerCallCount < 2) {
+          return Promise.resolve({
+            messages: [new AIMessage({ content: 'Step ' + workerCallCount })],
+            pendingAction: null,
+            awaitingApproval: false,
+            taskComplete: false,
+            taskSummary: 'Working on step ' + workerCallCount,
+          });
+        }
+        return Promise.resolve({
+          messages: [new AIMessage({ content: 'Done' })],
+          pendingAction: null,
+          awaitingApproval: false,
+          taskComplete: true,
+          taskSummary: 'Completed all steps',
+        });
+      }),
+    };
+
+    const workers = new Map([[WORKER_NAMES.CODE, mockWorker as any]]);
+    const graph = new VerbOSGraph(db, mockSupervisor as any, workers);
+
+    const events = [];
+    for await (const event of graph.stream('thread-selfloop', 'multi-step task')) {
+      events.push(event);
+    }
+
+    // Worker should be called twice (self-loop once, then complete)
+    expect(mockWorker.process).toHaveBeenCalledTimes(2);
+    // Supervisor should be called twice (initial routing, then final)
+    expect(mockSupervisor.route).toHaveBeenCalledTimes(2);
+  });
+
+  it('should force return to supervisor after MAX_WORKER_ITERATIONS', async () => {
+    const mockSupervisor = createMockSupervisor([
+      {
+        next: WORKER_NAMES.CODE,
+        finalResponse: null,
+        currentWorker: WORKER_NAMES.CODE,
+      },
+      {
+        next: NODE_NAMES.END,
+        finalResponse: 'Forced completion after iteration limit',
+        currentWorker: null,
+      }
+    ]);
+
+    // Worker never completes (always returns taskComplete: false)
+    const mockWorker = {
+      process: vi.fn().mockResolvedValue({
+        messages: [new AIMessage({ content: 'Still working...' })],
+        pendingAction: null,
+        awaitingApproval: false,
+        taskComplete: false,
+        taskSummary: 'Still processing',
+      }),
+    };
+
+    const workers = new Map([[WORKER_NAMES.CODE, mockWorker as any]]);
+    const graph = new VerbOSGraph(db, mockSupervisor as any, workers);
+
+    const events = [];
+    for await (const event of graph.stream('thread-maxiter', 'infinite task')) {
+      events.push(event);
+    }
+
+    // Worker should be called MAX_WORKER_ITERATIONS times before forced return
+    expect(mockWorker.process).toHaveBeenCalledTimes(MAX_WORKER_ITERATIONS);
+    // Should still complete successfully
+    expect(events.some(e => e.type === 'complete')).toBe(true);
+  });
+
+  it('should pass taskSummary to supervisor state', async () => {
+    const mockSupervisor = {
+      route: vi.fn().mockImplementation((state) => {
+        // On second call, check that taskSummary is present
+        if (state.taskSummary) {
+          return Promise.resolve({
+            next: NODE_NAMES.END,
+            finalResponse: 'Got summary: ' + state.taskSummary,
+            currentWorker: null,
+          });
+        }
+        return Promise.resolve({
+          next: WORKER_NAMES.FILESYSTEM,
+          finalResponse: null,
+          currentWorker: WORKER_NAMES.FILESYSTEM,
+        });
+      }),
+    };
+
+    const mockWorker = {
+      process: vi.fn().mockResolvedValue({
+        messages: [new AIMessage({ content: 'Done reading file' })],
+        pendingAction: null,
+        awaitingApproval: false,
+        taskComplete: true,
+        taskSummary: '[filesystem_worker] Read file /test.txt',
+      }),
+    };
+
+    const workers = new Map([[WORKER_NAMES.FILESYSTEM, mockWorker as any]]);
+    const graph = new VerbOSGraph(db, mockSupervisor as any, workers);
+
+    const events = [];
+    for await (const event of graph.stream('thread-summary', 'read a file')) {
+      events.push(event);
+    }
+
+    expect(mockSupervisor.route).toHaveBeenCalledTimes(2);
+    const completeEvent = events.find(e => e.type === 'complete');
+    expect(completeEvent?.data.response).toContain('filesystem_worker');
   });
 });

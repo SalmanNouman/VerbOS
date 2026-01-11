@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { BaseWorker } from '../BaseWorker';
-import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
+import { HumanMessage, ToolMessage } from '@langchain/core/messages';
 import { DynamicStructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
 import type { GraphStateType } from '../../state';
@@ -89,7 +89,9 @@ describe('BaseWorker', () => {
     expect(result.pendingAction).toBeDefined();
     expect(result.pendingAction?.toolName).toBe('write_file');
     expect(result.pendingAction?.sensitivity).toBe('sensitive');
-    expect(result.messages).toHaveLength(1); // Only AI message
+    // AI message + placeholder ToolMessage (required by Google API)
+    expect(result.messages).toHaveLength(2);
+    expect(result.messages[1].content).toBe('[Awaiting user approval]');
   });
 
   it('should execute pending action after approval', async () => {
@@ -122,5 +124,47 @@ describe('BaseWorker', () => {
     
     expect(result.messages).toHaveLength(2);
     expect(result.messages[1].content).toContain('Error: Tool non_existent_tool not found');
+  });
+
+  it('should set taskComplete=true when no tool calls are made', async () => {
+    mockModelResponse(worker, { content: 'Task is done, here is the result.' });
+
+    const state: GraphStateType = { messages: [new HumanMessage('do something')] } as any;
+    const result = await worker.process(state);
+    
+    expect(result.taskComplete).toBe(true);
+    expect(result.messages).toHaveLength(1);
+  });
+
+  it('should set taskComplete=false when tool calls are made', async () => {
+    mockModelResponse(worker, {
+      tool_calls: [{
+        name: 'read_file',
+        args: { path: 'test.txt' },
+        id: 'call-5'
+      }]
+    });
+
+    const state: GraphStateType = { messages: [] } as any;
+    const result = await worker.process(state);
+    
+    expect(result.taskComplete).toBe(false);
+  });
+
+  it('should generate taskSummary from tool executions', async () => {
+    mockModelResponse(worker, {
+      tool_calls: [{
+        name: 'read_file',
+        args: { path: '/some/file.txt' },
+        id: 'call-6'
+      }]
+    });
+
+    const state: GraphStateType = { messages: [] } as any;
+    const result = await worker.process(state);
+    
+    expect(result.taskSummary).toBeDefined();
+    expect(result.taskSummary).toContain('mock_worker');
+    expect(result.taskSummary).toContain('read_file');
   });
 });
