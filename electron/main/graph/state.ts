@@ -72,6 +72,24 @@ export const GraphState = Annotation.Root({
     reducer: iterationCountReducer,
     default: () => 0,
   }),
+
+  // Worker iteration count for self-loop limit
+  workerIterationCount: Annotation<number>({
+    reducer: (current, next) => next ?? current + 1,
+    default: () => 0,
+  }),
+
+  // Whether the current worker has completed its sub-task
+  taskComplete: Annotation<boolean>({
+    reducer: (_, next) => next ?? false,
+    default: () => false,
+  }),
+
+  // Concise summary of worker actions for supervisor context
+  taskSummary: Annotation<string | null>({
+    reducer: (current, next) => next ?? current,
+    default: () => null,
+  }),
 });
 
 export type GraphStateType = typeof GraphState.State;
@@ -102,3 +120,18 @@ export const NODE_NAMES = {
  * Maximum iterations before forcing end
  */
 export const MAX_ITERATIONS = 15;
+
+/**
+ * Maximum worker self-loop iterations before forcing return to supervisor
+ */
+export const MAX_WORKER_ITERATIONS = 5;
+
+/**
+ * Maximum characters for tool output before truncation (for supervisor context)
+ */
+export const MAX_TOOL_OUTPUT_LENGTH = 500;
+
+/**
+ * Maximum messages to pass to supervisor for routing decisions
+ */
+export const MAX_MESSAGES_FOR_SUPERVISOR = 20;

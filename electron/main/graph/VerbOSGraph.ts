@@ -1,6 +1,6 @@
 import { StateGraph, END, START, CompiledStateGraph } from '@langchain/langgraph';
 import { HumanMessage } from '@langchain/core/messages';
-import { GraphState, GraphStateType, NODE_NAMES, WORKER_NAMES } from './state';
+import { GraphState, GraphStateType, NODE_NAMES, WORKER_NAMES, MAX_WORKER_ITERATIONS } from './state';
 import { Supervisor } from './supervisor';
 import {
   FileSystemWorker,
@@ -59,53 +59,42 @@ export class VerbOSGraph {
         finalResponse: result.finalResponse,
         currentWorker: result.currentWorker,
         iterationCount: state.iterationCount + 1,
+        workerIterationCount: 0, // Reset worker iteration count when returning to supervisor
+        taskComplete: false, // Reset task completion flag
       };
     });
+
+    // Helper to create worker node handler with self-loop support
+    const createWorkerNode = (workerName: string) => {
+      return async (state: GraphStateType) => {
+        const worker = this.workers.get(workerName)!;
+        const result = await worker.process(state);
+        
+        // Determine currentWorker based on state
+        let currentWorker: string | null = null;
+        if (result.awaitingApproval) {
+          currentWorker = workerName;
+        } else if (!result.taskComplete) {
+          currentWorker = workerName; // Keep worker active for self-loop
+        }
+
+        return {
+          messages: result.messages,
+          pendingAction: result.pendingAction,
+          awaitingApproval: result.awaitingApproval,
+          currentWorker,
+          taskComplete: result.taskComplete ?? false,
+          taskSummary: result.taskSummary ?? null,
+          workerIterationCount: state.workerIterationCount + 1,
+        };
+      };
+    };
 
     // Add worker nodes
-    workflow.addNode('filesystem_worker', async (state: GraphStateType) => {
-      const worker = this.workers.get(WORKER_NAMES.FILESYSTEM)!;
-      const result = await worker.process(state);
-      return {
-        messages: result.messages,
-        pendingAction: result.pendingAction,
-        awaitingApproval: result.awaitingApproval,
-        currentWorker: result.awaitingApproval ? WORKER_NAMES.FILESYSTEM : null,
-      };
-    });
-
-    workflow.addNode('system_worker', async (state: GraphStateType) => {
-      const worker = this.workers.get(WORKER_NAMES.SYSTEM)!;
-      const result = await worker.process(state);
-      return {
-        messages: result.messages,
-        pendingAction: result.pendingAction,
-        awaitingApproval: result.awaitingApproval,
-        currentWorker: result.awaitingApproval ? WORKER_NAMES.SYSTEM : null,
-      };
-    });
-
-    workflow.addNode('researcher_worker', async (state: GraphStateType) => {
-      const worker = this.workers.get(WORKER_NAMES.RESEARCHER)!;
-      const result = await worker.process(state);
-      return {
-        messages: result.messages,
-        pendingAction: result.pendingAction,
-        awaitingApproval: result.awaitingApproval,
-        currentWorker: result.awaitingApproval ? WORKER_NAMES.RESEARCHER : null,
-      };
-    });
-
-    workflow.addNode('code_worker', async (state: GraphStateType) => {
-      const worker = this.workers.get(WORKER_NAMES.CODE)!;
-      const result = await worker.process(state);
-      return {
-        messages: result.messages,
-        pendingAction: result.pendingAction,
-        awaitingApproval: result.awaitingApproval,
-        currentWorker: result.awaitingApproval ? WORKER_NAMES.CODE : null,
-      };
-    });
+    workflow.addNode('filesystem_worker', createWorkerNode(WORKER_NAMES.FILESYSTEM));
+    workflow.addNode('system_worker', createWorkerNode(WORKER_NAMES.SYSTEM));
+    workflow.addNode('researcher_worker', createWorkerNode(WORKER_NAMES.RESEARCHER));
+    workflow.addNode('code_worker', createWorkerNode(WORKER_NAMES.CODE));
 
     // Add human approval node (interrupt point)
     workflow.addNode('human_approval', async () => {
@@ -128,18 +117,56 @@ export class VerbOSGraph {
       }
     );
 
-    // Workers -> Human Approval or Supervisor (conditional)
-    const workerToNext = (state: GraphStateType): string => {
-      if (state.awaitingApproval) {
-        return 'human_approval';
-      }
-      return 'supervisor';
+    // Workers -> Human Approval, Self-loop, or Supervisor (conditional)
+    const workerToNextConditional = (workerName: string) => {
+      return (state: GraphStateType): string => {
+        // HITL takes priority
+        if (state.awaitingApproval) {
+          return 'human_approval';
+        }
+        
+        // If worker signals completion, return to supervisor
+        if (state.taskComplete) {
+          return 'supervisor';
+        }
+        
+        // If worker iteration limit reached, force return to supervisor
+        if (state.workerIterationCount >= MAX_WORKER_ITERATIONS) {
+          return 'supervisor';
+        }
+        
+        // Otherwise, loop back to the same worker
+        return workerName;
+      };
     };
 
-    workflow.addConditionalEdges('filesystem_worker', workerToNext);
-    workflow.addConditionalEdges('system_worker', workerToNext);
-    workflow.addConditionalEdges('researcher_worker', workerToNext);
-    workflow.addConditionalEdges('code_worker', workerToNext);
+    // Define edge targets for each worker (including self-loop)
+    const workerEdgeTargets = (workerName: string) => ({
+      'human_approval': 'human_approval',
+      'supervisor': 'supervisor',
+      [workerName]: workerName,
+    });
+
+    workflow.addConditionalEdges(
+      'filesystem_worker', 
+      workerToNextConditional(WORKER_NAMES.FILESYSTEM),
+      workerEdgeTargets(WORKER_NAMES.FILESYSTEM)
+    );
+    workflow.addConditionalEdges(
+      'system_worker', 
+      workerToNextConditional(WORKER_NAMES.SYSTEM),
+      workerEdgeTargets(WORKER_NAMES.SYSTEM)
+    );
+    workflow.addConditionalEdges(
+      'researcher_worker', 
+      workerToNextConditional(WORKER_NAMES.RESEARCHER),
+      workerEdgeTargets(WORKER_NAMES.RESEARCHER)
+    );
+    workflow.addConditionalEdges(
+      'code_worker', 
+      workerToNextConditional(WORKER_NAMES.CODE),
+      workerEdgeTargets(WORKER_NAMES.CODE)
+    );
 
     // Human Approval -> Supervisor (after approval)
     workflow.addEdge('human_approval', 'supervisor');
@@ -182,6 +209,9 @@ export class VerbOSGraph {
       inputState = {
         messages: [new HumanMessage(input)],
         iterationCount: 0,
+        workerIterationCount: 0,
+        taskComplete: false,
+        taskSummary: null,
         error: null,
         finalResponse: null,
       };

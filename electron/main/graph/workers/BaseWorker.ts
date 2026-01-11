@@ -19,6 +19,8 @@ export interface WorkerResult {
   messages: BaseMessage[];
   pendingAction?: PendingAction | null;
   awaitingApproval?: boolean;
+  taskComplete?: boolean;
+  taskSummary?: string;
 }
 
 /**
@@ -130,6 +132,10 @@ export abstract class BaseWorker {
 
       // Check for tool calls
       if (response.tool_calls && response.tool_calls.length > 0) {
+        // We need to handle ALL tool calls to avoid API errors about mismatched function call/response parts
+        // Google API requires a ToolMessage for every tool call in the AIMessage
+        let pendingAction: PendingAction | null = null;
+
         for (const toolCall of response.tool_calls) {
           GraphLogger.info('TOOL', `Worker ${this.name} calling tool: ${toolCall.name}`, toolCall.args);    
 
@@ -154,22 +160,30 @@ export abstract class BaseWorker {
           const sensitivity = getToolSensitivity(toolCall.name, toolCall.args as Record<string, unknown>);  
 
           if (sensitivity === 'sensitive') {
-            GraphLogger.info('WORKER', `Sensitive action detected for ${toolCall.name}, awaiting approval`);
-            // Return pending action for user approval
-            const pendingAction: PendingAction = {
-              id: toolCall.id,
-              workerName: this.name,
-              toolName: toolCall.name,
-              toolArgs: toolCall.args as Record<string, unknown>,
-              sensitivity,
-              description: this.describeAction(toolCall.name, toolCall.args as Record<string, unknown>),    
-            };
-
-            return {
-              messages: resultMessages,
-              pendingAction,
-              awaitingApproval: true,
-            };
+            if (!pendingAction) {
+              // First sensitive action - queue it for approval
+              GraphLogger.info('WORKER', `Sensitive action detected for ${toolCall.name}, awaiting approval`);
+              pendingAction = {
+                id: toolCall.id,
+                workerName: this.name,
+                toolName: toolCall.name,
+                toolArgs: toolCall.args as Record<string, unknown>,
+                sensitivity,
+                description: this.describeAction(toolCall.name, toolCall.args as Record<string, unknown>),    
+              };
+              // Add placeholder ToolMessage so API doesn't complain about missing response
+              resultMessages.push(new ToolMessage({
+                tool_call_id: toolCall.id,
+                content: '[Awaiting user approval]',
+              }));
+            } else {
+              // Additional sensitive actions - add placeholder (will need separate approval later)
+              resultMessages.push(new ToolMessage({
+                tool_call_id: toolCall.id,
+                content: '[Queued - previous action awaiting approval]',
+              }));
+            }
+            continue;
           }
 
           // Execute safe/moderate tools immediately
@@ -189,12 +203,32 @@ export abstract class BaseWorker {
             }));
           }
         }
+
+        // If we have a pending action, return for HITL approval
+        if (pendingAction) {
+          return {
+            messages: resultMessages,
+            pendingAction,
+            awaitingApproval: true,
+          };
+        }
       }
+
+      // Determine if task is complete:
+      // - No tool calls means the worker is done (just text response)
+      // - Or if the response contains a finish signal
+      const hasToolCalls = response.tool_calls && response.tool_calls.length > 0;
+      const taskComplete = !hasToolCalls;
+
+      // Generate task summary from tool executions
+      const taskSummary = this.generateTaskSummary(resultMessages);
 
       return {
         messages: resultMessages,
         pendingAction: null,
         awaitingApproval: false,
+        taskComplete,
+        taskSummary,
       };
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
@@ -235,6 +269,37 @@ export abstract class BaseWorker {
         content: `Error: ${errorMsg}`,
       })];
     }
+  }
+
+  /**
+   * Generate a concise summary of tool executions for supervisor context
+   */
+  protected generateTaskSummary(messages: BaseMessage[]): string {
+    const summaryParts: string[] = [];
+
+    for (const msg of messages) {
+      // Extract tool calls from AI messages
+      if (msg instanceof AIMessage && msg.tool_calls && msg.tool_calls.length > 0) {
+        for (const tc of msg.tool_calls) {
+          const argsPreview = Object.entries(tc.args as Record<string, unknown>)
+            .slice(0, 2)
+            .map(([k, v]) => `${k}=${typeof v === 'string' ? v.substring(0, 30) : v}`)
+            .join(', ');
+          summaryParts.push(`Called ${tc.name}(${argsPreview})`);
+        }
+      }
+
+      // Extract results from tool messages (truncated)
+      if (msg instanceof ToolMessage) {
+        const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+        const preview = content.length > 100 ? content.substring(0, 100) + '...' : content;
+        summaryParts.push(`Result: ${preview}`);
+      }
+    }
+
+    return summaryParts.length > 0 
+      ? `[${this.name}] ${summaryParts.join(' | ')}`
+      : `[${this.name}] Processed request`;
   }
 
   /**
