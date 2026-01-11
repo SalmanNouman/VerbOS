@@ -8,9 +8,11 @@ contextBridge.exposeInMainWorld('verbos', {
   
   // Event listeners for the new graph-based agent
   onAgentEvent: (callback: (event: any) => void) => {
+    ipcRenderer.removeAllListeners('agent-event');
     ipcRenderer.on('agent-event', (_event, agentEvent: any) => callback(agentEvent));
   },
   onStreamEnd: (callback: () => void) => {
+    ipcRenderer.removeAllListeners('stream-end');
     ipcRenderer.on('stream-end', callback);
   },
   removeAgentEventListener: () => {
@@ -27,6 +29,7 @@ contextBridge.exposeInMainWorld('verbos', {
 
   // Legacy token listener (for backwards compatibility)
   onToken: (callback: (token: string) => void) => {
+    ipcRenderer.removeAllListeners('agent-token');
     ipcRenderer.on('agent-token', (_event, token: string) => callback(token));
   },
   removeTokenListener: () => {
