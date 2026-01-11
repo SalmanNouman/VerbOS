@@ -59,6 +59,7 @@ export class CodeWorker extends BaseWorker {
         },
       }),
       FileTool.readFile,
+      FileTool.writeFile,
       FileTool.listDirectory,
     ];
 
@@ -74,6 +75,7 @@ Your capabilities:
 - Suggest refactoring improvements (refactor_code)
 - Explain code in plain language (explain_code)
 - Read files to get code context (read_file)
+- Write code to files (write_file)
 - List directories to explore project structure (list_directory)
 
 Guidelines:
