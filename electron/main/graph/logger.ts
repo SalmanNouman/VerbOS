@@ -5,7 +5,7 @@ export enum LogLevel {
   DEBUG = 'DEBUG',
 }
 
-export type LogCategory = 'GRAPH' | 'WORKER' | 'TOOL' | 'CHECKPOINT' | 'SYSTEM';
+export type LogCategory = 'GRAPH' | 'WORKER' | 'TOOL' | 'CHECKPOINT' | 'SYSTEM' | 'PYTHON';
 
 export interface LogEntry {
   timestamp: string;

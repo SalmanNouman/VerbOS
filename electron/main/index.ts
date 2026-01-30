@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import { join } from 'path';
 import { AgentServiceGraph, AgentEvent } from './AgentServiceGraph';
 import { StorageService } from './storage';
+import { getPythonManager, setupPythonManagerLifecycle } from './PythonManager';
 import dotenv from 'dotenv';
 import { GraphLogger } from './graph/logger';
 
@@ -46,9 +47,16 @@ function createWindow(): void {
 }
 
 // App event listeners
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   GraphLogger.info('SYSTEM', 'App is ready, initializing services...');
   try {
+    // Setup Python backend lifecycle management
+    setupPythonManagerLifecycle();
+
+    // Start Python backend
+    const pythonManager = getPythonManager();
+    await pythonManager.start();
+
     // Initialize StorageService first (AgentService depends on it)
     storageService = new StorageService();
     // Pass the database instance to AgentServiceGraph for LangGraph checkpointing
