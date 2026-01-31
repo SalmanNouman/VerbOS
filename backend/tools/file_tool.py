@@ -56,8 +56,13 @@ def write_file(path: str, content: str, encoding: str = "utf-8") -> str:
         )
     
     validated_path = validate_write_path(path)
-    validated_path.write_text(content, encoding=encoding)
-    return f"Successfully wrote to file: {validated_path}"
+    
+    safe_path = Path(validated_path).resolve()
+    if safe_path != validated_path.resolve():
+        raise PermissionError("Security Violation: Path manipulation detected.")
+    
+    safe_path.write_text(content, encoding=encoding)
+    return f"Successfully wrote to file: {safe_path}"
 
 
 @tool
