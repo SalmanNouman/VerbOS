@@ -55,14 +55,9 @@ def write_file(path: str, content: str, encoding: str = "utf-8") -> str:
             f"Maximum allowed size is {MAX_WRITE_SIZE // 1024}KB."
         )
     
-    validated_path = validate_write_path(path)
-    
-    safe_path = Path(validated_path).resolve()
-    if safe_path != validated_path.resolve():
-        raise PermissionError("Security Violation: Path manipulation detected.")
-    
-    safe_path.write_text(content, encoding=encoding)
-    return f"Successfully wrote to file: {safe_path}"
+    sanitized_path = validate_write_path(path)
+    Path(sanitized_path).write_text(content, encoding=encoding)
+    return f"Successfully wrote to file: {sanitized_path}"
 
 
 @tool

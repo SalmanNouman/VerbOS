@@ -87,8 +87,20 @@ def validate_directory_path(path: str) -> Path:
     return validated_path
 
 
+def sanitize_path_component(component: str) -> str:
+    """Sanitize a single path component to prevent injection."""
+    dangerous_chars = ['..', '/', '\\', '\x00', '\n', '\r']
+    sanitized = component
+    for char in dangerous_chars:
+        sanitized = sanitized.replace(char, '_')
+    return sanitized
+
+
 def validate_write_path(path: str) -> Path:
-    """Validates a path for file writing operations."""
+    """
+    Validates and sanitizes a path for file writing operations.
+    Returns a safe path constructed from validated components.
+    """
     if not path:
         raise ValueError("Path cannot be empty")
 
@@ -97,15 +109,24 @@ def validate_write_path(path: str) -> Path:
     if not file_path.is_absolute():
         file_path = Path.home() / path
     
-    file_path = file_path.resolve()
-    parent_dir = file_path.parent
+    resolved_path = file_path.resolve()
+    parent_dir = resolved_path.parent
     
     try:
         validate_directory_path(str(parent_dir))
     except FileNotFoundError:
         raise ValueError(f"Operation Failed: The parent directory '{parent_dir}' does not exist.")
     
-    if file_path.exists():
-        return validate_path(str(file_path))
+    if resolved_path.exists():
+        return validate_path(str(resolved_path))
     
-    return file_path
+    safe_filename = sanitize_path_component(resolved_path.name)
+    safe_path = parent_dir / safe_filename
+    
+    for blocked in SECURITY_CONFIG["blocked_paths"]:
+        if str(safe_path).lower().startswith(blocked.lower()):
+            raise PermissionError(
+                f"Security Violation: Access to system directory '{safe_path}' is strictly prohibited."
+            )
+    
+    return safe_path
