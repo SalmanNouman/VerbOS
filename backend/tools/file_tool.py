@@ -55,9 +55,9 @@ def write_file(path: str, content: str, encoding: str = "utf-8") -> str:
             f"Maximum allowed size is {MAX_WRITE_SIZE // 1024}KB."
         )
     
-    sanitized_path = validate_write_path(path)
-    Path(sanitized_path).write_text(content, encoding=encoding)
-    return f"Successfully wrote to file: {sanitized_path}"
+    validated_path = validate_write_path(path)
+    validated_path.write_text(content, encoding=encoding)
+    return f"Successfully wrote to file: {validated_path}"
 
 
 @tool

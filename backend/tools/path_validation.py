@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 
 SECURITY_CONFIG = {
@@ -119,14 +118,17 @@ def validate_write_path(path: str) -> Path:
     
     if resolved_path.exists():
         return validate_path(str(resolved_path))
-    
-    safe_filename = sanitize_path_component(resolved_path.name)
-    safe_path = parent_dir / safe_filename
-    
+
+    sanitized_filename = sanitize_path_component(resolved_path.name)
+    if sanitized_filename != resolved_path.name:
+        raise ValueError(
+            "Operation Failed: The file name contains invalid characters."
+        )
+
     for blocked in SECURITY_CONFIG["blocked_paths"]:
-        if str(safe_path).lower().startswith(blocked.lower()):
+        if str(resolved_path).lower().startswith(blocked.lower()):
             raise PermissionError(
-                f"Security Violation: Access to system directory '{safe_path}' is strictly prohibited."
+                f"Security Violation: Access to system directory '{resolved_path}' is strictly prohibited."
             )
-    
-    return safe_path
+
+    return resolved_path
