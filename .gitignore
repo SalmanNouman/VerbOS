@@ -12,3 +12,9 @@ build/
 
 # VerbOS specific ignores
 ProjectPlans/
+
+# Python
+backend/__pycache__/
+backend/.venv/
+backend/.pytest_cache/
+*.pyc
