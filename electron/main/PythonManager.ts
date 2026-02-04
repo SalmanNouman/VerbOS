@@ -1,7 +1,7 @@
 import { spawn, ChildProcess } from 'child_process';
 import { join } from 'path';
 import { app } from 'electron';
-import { GraphLogger } from './graph/logger';
+import { GraphLogger } from './logger';
 
 const PYTHON_PORT = 8000;
 const HEALTH_CHECK_INTERVAL = 500;
@@ -32,11 +32,20 @@ export class PythonManager {
 
     const serverScript = join(backendPath, 'server.py');
 
+    const userDataPath = app.getPath('userData');
+    const env = {
+      ...process.env,
+      VERBOS_USER_DATA: userDataPath,
+    };
+
+    GraphLogger.info('PYTHON', `User data path: ${userDataPath}`);
+
     if (this.isDev) {
-      this.process = spawn('uv', ['run', 'python', serverScript, '--port', String(this.port)], {
+      this.process = spawn('uv', ['run', serverScript, '--port', String(this.port)], {
         cwd: backendPath,
         shell: true,
         stdio: ['ignore', 'pipe', 'pipe'],
+        env,
       });
     } else {
       const executableName = process.platform === 'win32' ? 'server.exe' : 'server';
@@ -44,6 +53,7 @@ export class PythonManager {
       this.process = spawn(executablePath, ['--port', String(this.port)], {
         cwd: backendPath,
         stdio: ['ignore', 'pipe', 'pipe'],
+        env,
       });
     }
 

@@ -1,10 +1,10 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import { join } from 'path';
-import { AgentServiceGraph, AgentEvent } from './AgentServiceGraph';
 import { StorageService } from './storage';
 import { getPythonManager, setupPythonManagerLifecycle } from './PythonManager';
+import { getPythonAPIClient } from './PythonAPIClient';
 import dotenv from 'dotenv';
-import { GraphLogger } from './graph/logger';
+import { GraphLogger } from './logger';
 
 // Load environment variables with explicit path
 dotenv.config({ path: join(__dirname, '../../.env') });
@@ -15,7 +15,6 @@ GraphLogger.info('SYSTEM', `API Key exists: ${!!process.env.GOOGLE_API_KEY}`);
 const isDev = process.env.NODE_ENV === 'development';
 
 // Services will be initialized later
-let agentService: AgentServiceGraph | null = null;
 let storageService: StorageService | null = null;
 
 function createWindow(): void {
@@ -57,11 +56,9 @@ app.whenReady().then(async () => {
     const pythonManager = getPythonManager();
     await pythonManager.start();
 
-    // Initialize StorageService first (AgentService depends on it)
+    // Initialize StorageService
     storageService = new StorageService();
-    // Pass the database instance to AgentServiceGraph for LangGraph checkpointing
-    agentService = new AgentServiceGraph(storageService, storageService.db);
-    GraphLogger.info('SYSTEM', 'AgentServiceGraph and StorageService initialized successfully');
+    GraphLogger.info('SYSTEM', 'StorageService initialized, Python backend ready');
 
     createWindow();
   } catch (error) {
@@ -98,54 +95,68 @@ ipcMain.handle('ask-agent', async (event, { sessionId, prompt }: { sessionId: st
     return { streaming: true };
   }
 
-  if (!agentService) {
-    event.sender.send('agent-event', { type: 'error', message: 'AgentService not initialized' });
-    event.sender.send('stream-end');
-    return { streaming: true };
+  // Save user message to storage
+  if (storageService) {
+    storageService.addMessage(sessionId, 'user', prompt);
   }
 
-  // Start streaming events from the graph
-  await agentService.ask(sessionId, prompt, (agentEvent: AgentEvent) => {
-    event.sender.send('agent-event', agentEvent);
-  });
+  // Stream events from Python backend
+  const apiClient = getPythonAPIClient();
+  let finalResponse = '';
 
-  // Send stream-end event when done
+  try {
+    for await (const agentEvent of apiClient.streamChat(sessionId, prompt)) {
+      event.sender.send('agent-event', agentEvent);
+      if (agentEvent.type === 'response' && agentEvent.message) {
+        finalResponse = agentEvent.message;
+      }
+    }
+
+    // Save assistant response to storage
+    if (storageService && finalResponse) {
+      storageService.addMessage(sessionId, 'assistant', finalResponse);
+    }
+  } catch (error) {
+    GraphLogger.error('SYSTEM', 'Error streaming from Python backend', error);
+    event.sender.send('agent-event', {
+      type: 'error',
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+
   event.sender.send('stream-end');
-
   return { streaming: true };
 });
 
 // Approval handlers for HITL
 ipcMain.handle('agent:approve', async (_event, sessionId: string) => {
-  try{
-    if (!agentService) throw new Error('AgentService not initialized');
-    await agentService.approveAction(sessionId);
-    return { success: true };
+  try {
+    const apiClient = getPythonAPIClient();
+    return await apiClient.approveAction(sessionId);
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
   }
 });
 
 ipcMain.handle('agent:deny', async (_event, sessionId: string, reason?: string) => {
-  try{
-    if (!agentService) throw new Error('AgentService not initialized');
-    await agentService.denyAction(sessionId, reason);
-    return { success: true };
+  try {
+    const apiClient = getPythonAPIClient();
+    return await apiClient.denyAction(sessionId, reason);
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
   }
 });
 
 ipcMain.handle('agent:resume', async (event, sessionId: string) => {
-  if (!agentService) throw new Error('AgentService not initialized');
+  const apiClient = getPythonAPIClient();
   try {
-    await agentService.resume(sessionId, (agentEvent: AgentEvent) => {
+    for await (const agentEvent of apiClient.resumeChat(sessionId)) {
       event.sender.send('agent-event', agentEvent);
-    });
+    }
   } catch (error) {
     event.sender.send('agent-event', {
       type: 'error',
-      message: error instanceof Error ? error.message : 'Unknown error'
+      message: error instanceof Error ? error.message : 'Unknown error',
     });
   } finally {
     event.sender.send('stream-end');
