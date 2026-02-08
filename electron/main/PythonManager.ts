@@ -2,6 +2,7 @@ import { spawn, ChildProcess } from 'child_process';
 import { join } from 'path';
 import { app } from 'electron';
 import { GraphLogger } from './logger';
+import { resolveExecutablePath } from './utils';
 
 const PYTHON_PORT = 8000;
 const HEALTH_CHECK_INTERVAL = 500;
@@ -41,9 +42,12 @@ export class PythonManager {
     GraphLogger.info('PYTHON', `User data path: ${userDataPath}`);
 
     if (this.isDev) {
-      this.process = spawn('uv', ['run', serverScript, '--port', String(this.port)], {
+      const uvPath = resolveExecutablePath('uv');
+      GraphLogger.info('PYTHON', `Using uv at: ${uvPath}`);
+      
+      this.process = spawn(uvPath, ['run', serverScript, '--port', String(this.port)], {
         cwd: backendPath,
-        shell: true,
+        shell: false,
         stdio: ['ignore', 'pipe', 'pipe'],
         env,
       });
@@ -122,7 +126,8 @@ export class PythonManager {
     GraphLogger.info('PYTHON', 'Stopping Python backend...');
 
     if (process.platform === 'win32') {
-      spawn('taskkill', ['/pid', String(this.process.pid), '/f', '/t'], { shell: true });
+      const taskkillPath = resolveExecutablePath('taskkill');
+      spawn(taskkillPath, ['/pid', String(this.process.pid), '/f', '/t'], { shell: false });
     } else {
       this.process.kill('SIGTERM');
     }
