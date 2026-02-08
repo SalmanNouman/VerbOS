@@ -3,7 +3,7 @@ import { join } from 'path';
 import Database from 'better-sqlite3';
 import { v4 as uuidv4 } from 'uuid';
 import type { Message, ChatSession, ChatSummary } from '../../src/types/verbos';
-import { GraphLogger } from './graph/logger';
+import { GraphLogger } from './logger';
 
 export class StorageService {
   public readonly db: Database.Database;
