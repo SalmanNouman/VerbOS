@@ -1,4 +1,4 @@
-import { execSync } from 'child_process';
+import { spawnSync } from 'child_process';
 import { platform } from 'os';
 import { existsSync } from 'fs';
 import { GraphLogger } from './logger';
@@ -6,9 +6,16 @@ import { GraphLogger } from './logger';
 /**
  * Safely resolves the absolute path of an executable using system utilities.
  * This prevents path hijacking by ensuring we use a specific, validated binary.
+ * Uses spawnSync with shell: false to prevent command injection.
  */
 export function resolveExecutablePath(name: string): string {
   const isWindows = platform() === 'win32';
+  
+  // names should not contain shell meta-characters
+  if (/[&|;><`\s]/.test(name)) {
+    GraphLogger.error('SYSTEM', `Invalid executable name provided: ${name}`);
+    return name;
+  }
   
   try {
     if (isWindows) {
@@ -19,10 +26,16 @@ export function resolveExecutablePath(name: string): string {
         return name;
       }
       
-      const output = execSync(`"${wherePath}" ${name}`, { encoding: 'utf8' }).trim();
-      const paths = output.split(/\r?\n/);
-      if (paths.length > 0 && paths[0] && existsSync(paths[0])) {
-        return paths[0];
+      const result = spawnSync(wherePath, [name], { 
+        encoding: 'utf8',
+        shell: false 
+      });
+
+      if (result.status === 0 && result.stdout) {
+        const paths = result.stdout.trim().split(/\r?\n/);
+        if (paths.length > 0 && paths[0] && existsSync(paths[0])) {
+          return paths[0];
+        }
       }
     } else {
       // Use absolute path to which on Unix-like systems
@@ -32,9 +45,16 @@ export function resolveExecutablePath(name: string): string {
         return name;
       }
       
-      const path = execSync(`"${whichPath}" ${name}`, { encoding: 'utf8' }).trim();
-      if (path && existsSync(path)) {
-        return path;
+      const result = spawnSync(whichPath, [name], { 
+        encoding: 'utf8',
+        shell: false 
+      });
+
+      if (result.status === 0 && result.stdout) {
+        const path = result.stdout.trim();
+        if (path && existsSync(path)) {
+          return path;
+        }
       }
     }
   } catch (error) {
