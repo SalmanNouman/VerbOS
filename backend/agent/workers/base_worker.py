@@ -2,43 +2,31 @@ import os
 import uuid
 import logging
 from abc import ABC
-from typing import Literal
 from langchain_core.messages import AIMessage, ToolMessage, SystemMessage, BaseMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_ollama import ChatOllama
 from langchain_core.tools import BaseTool
 from agent.state import GraphState, PendingAction
-from tools.shell_tool import get_command_sensitivity
+from agent.sensitivity import SensitivityLevel, classify_tool
 
 logger = logging.getLogger(__name__)
 
 
-def get_tool_sensitivity(
-    tool_name: str,
-    tool_args: dict
-) -> Literal["safe", "moderate", "sensitive"]:
-    """Determines the sensitivity of a tool call for HITL purposes."""
-    if tool_name in ("read_file", "list_directory"):
-        return "safe"
-    if tool_name in ("write_file", "create_directory", "delete_file"):
-        return "sensitive"
-    if tool_name == "get_system_info":
-        return "safe"
-    if tool_name == "execute_shell_command":
-        command = tool_args.get("command", "")
-        if not isinstance(command, str) or not command:
-            return "sensitive"
-        return get_command_sensitivity(command)
-    
-    code_tools = ["analyze_code", "generate_code", "refactor_code", "explain_code"]
-    if tool_name in code_tools:
-        return "safe"
-    
-    research_tools = ["summarize_context", "extract_facts", "analyze_code_context"]
-    if tool_name in research_tools:
-        return "safe"
-    
-    return "sensitive"
+def get_tool_sensitivity(tool_name: str, tool_args: dict) -> SensitivityLevel:
+    """
+    Thin wrapper around `agent.sensitivity.classify_tool` kept for
+    backwards compatibility with existing imports. New code should import
+    `classify_tool` directly from `agent.sensitivity`.
+    """
+    return classify_tool(tool_name, tool_args)
+
+
+def pending_placeholder_id(tool_call_id: str) -> str:
+    """
+    Stable message id for the `[Awaiting user approval]` placeholder so it
+    can be removed via `RemoveMessage` when the action is approved or denied.
+    """
+    return f"pending-approval-{tool_call_id}"
 
 
 class WorkerResult:
@@ -129,7 +117,7 @@ class BaseWorker(ABC):
                         ))
                         continue
 
-                    sensitivity = get_tool_sensitivity(tool_name, tool_args)
+                    sensitivity = classify_tool(tool_name, tool_args)
 
                     if sensitivity == "sensitive":
                         logger.info(f"Sensitive action detected for {tool_name}, awaiting approval")
@@ -142,6 +130,7 @@ class BaseWorker(ABC):
                             description=self._describe_action(tool_name, tool_args),
                         )
                         result_messages.append(ToolMessage(
+                            id=pending_placeholder_id(tool_id),
                             tool_call_id=tool_id,
                             content="[Awaiting user approval]",
                         ))
