@@ -71,7 +71,7 @@ VerbOS is a two-process desktop app: an **Electron + React** renderer that talks
 
 ### Secure IPC bridge
 
-The renderer has no direct Node access. `electron/preload/index.ts` exposes a narrow surface via `contextBridge.exposeInMainWorld('verbos', {...})`, so renderer code talks to the main process through `window.verbos.*` (e.g. `window.verbos.askAgent(sessionId, prompt)`, `window.verbos.onAgentEvent(cb)`, `window.verbos.approveAction(sessionId)`). The main process then relays to the Python backend over HTTP.
+`electron/preload/index.ts` exposes a narrow surface via `contextBridge.exposeInMainWorld('verbos', {...})`, so renderer code talks to the main process through `window.verbos.*` (e.g. `window.verbos.askAgent(sessionId, prompt)`, `window.verbos.onAgentEvent(cb)`, `window.verbos.approveAction(sessionId)`). The main process then relays to the Python backend over HTTP.
 
 ### Supervisor-Worker pattern
 
@@ -154,7 +154,7 @@ When a worker proposes a sensitive tool call (e.g. `write_file`, destructive she
 
 ### Calling the agent from renderer code
 
-The preload exposes a `window.verbos` API; `window.electron` does **not** exist.
+The preload exposes a `window.verbos` API.
 
 ```ts
 // Send a prompt and subscribe to streamed events.
