@@ -26,117 +26,156 @@ VerbOS aims to be the **Interface** for modern computer interaction:
   - **Researcher Worker:** Utilize local LLMs for deep thinking and planning.
 - **Human-In-The-Loop (HITL):** Sensitive actions (like writing files or running commands) require explicit user approval via the UI.
 - **OS Integration:** Deep integration with the file system and system primitives.
-- **Persistent Memory:** SQLite-based storage for long-term conversation history and smart context window management.
-- **Streaming Responses:** Real-time feedback with Markdown support and syntax highlighting.
+- **Persistent Memory:** SQLite-based storage for long-term conversation history, with LangGraph checkpoints for in-progress graph state.
+- **Server-Sent Events:** Real-time status, tool-call, and response events from the backend to the UI with Markdown + syntax highlighting.
 
 ---
 
 ## Tech Stack
 
-VerbOS adheres to a strict, modern tech stack for performance and security:
+VerbOS is a two-process desktop app: an **Electron + React** renderer that talks to a **local FastAPI / LangGraph** backend over HTTP (SSE).
 
-- **Runtime:** [Electron](https://www.electronjs.org/) (Cross-platform desktop container)
-- **Frontend:** [React](https://react.dev/) + [TypeScript](https://www.typescriptlang.org/) + [Vite](https://vitejs.dev/) + [Tailwind CSS](https://tailwindcss.com/)
-- **Backend:** Node.js (Electron Main Process)
-- **AI Orchestration:** [LangGraph](https://langchain-ai.github.io/langgraphjs/)
-- **Model Layer:** 
-  - **Cloud:** Google Gemini 2.0 Flash (via `@langchain/google-genai`)
-  - **Local:** Ollama (via `@langchain/ollama`)
-- **Database:** Better-SQLite3
+**Renderer (Electron main + preload + React)**
+- [Electron](https://www.electronjs.org/) 39 (cross-platform desktop container, strict context isolation)
+- [React](https://react.dev/) 19 + [TypeScript](https://www.typescriptlang.org/) + [Vite](https://vitejs.dev/) + [Tailwind CSS](https://tailwindcss.com/)
+- [better-sqlite3](https://github.com/WiseLibs/better-sqlite3) — local chat-history store (not the agent checkpoint store; see below)
+
+**Agent backend (spawned as a child process by Electron's main process)**
+- [Python 3.13+](https://www.python.org/) managed by [uv](https://docs.astral.sh/uv/)
+- [FastAPI](https://fastapi.tiangolo.com/) + [Uvicorn](https://www.uvicorn.org/) on `127.0.0.1:8000`
+- [LangGraph (Python)](https://langchain-ai.github.io/langgraph/) for the supervisor-worker graph
+- [langgraph-checkpoint-sqlite](https://pypi.org/project/langgraph-checkpoint-sqlite/) (`aiosqlite`) for per-thread checkpointed graph state
+- [LangChain](https://python.langchain.com/) + `langchain-google-genai` (Gemini) and `langchain-ollama` (local models)
 
 ---
 
 ## Architecture
 
-### Secure IPC Bridge
-VerbOS follows strict Electron security patterns:
-- **Context Isolation:** The Renderer process has no direct access to Node.js.
-- **Type-Safe IPC:** Communication happens through a secure `ContextBridge`, exposing only necessary methods like `window.electron.askAgent()`.
+### Process topology
 
-### Supervisor-Worker Pattern
-VerbOS moves beyond simple ReAct loops to a sophisticated **Supervisor-Worker** architecture:
-1.  **Supervisor:** The central "brain" that analyzes user intent and routes the task to the most appropriate worker.
-2.  **Workers:** Specialized sub-agents (File, System, Code, Researcher) that possess specific tools and prompts for their domain.
-3.  **Graph State:** A shared state object manages the conversation history, current steps, and agent outputs across the graph.
+```
+┌──────────────────────────┐        ┌────────────────────────────┐
+│  Electron Renderer       │        │  Electron Main             │
+│  (React + Vite)          │◀──IPC──▶  - PythonManager           │
+│  window.verbos.askAgent()│        │  - spawns `uv run server.py│
+└──────────────────────────┘        │    --port 8000`            │
+                                    └────────────────┬───────────┘
+                                                     │ HTTP / SSE
+                                                     ▼
+                                    ┌────────────────────────────┐
+                                    │  Python FastAPI backend    │
+                                    │  agent/graph.py (LangGraph)│
+                                    │  /api/chat, /api/approve…  │
+                                    └────────────────────────────┘
+```
+
+### Secure IPC bridge
+
+`electron/preload/index.ts` exposes a narrow surface via `contextBridge.exposeInMainWorld('verbos', {...})`, so renderer code talks to the main process through `window.verbos.*` (e.g. `window.verbos.askAgent(sessionId, prompt)`, `window.verbos.onAgentEvent(cb)`, `window.verbos.approveAction(sessionId)`). The main process then relays to the Python backend over HTTP.
+
+### Supervisor-Worker pattern
+
+1.  **Supervisor** — central router that analyzes user intent and picks a worker.
+2.  **Workers** — FileSystem, System, Code, Researcher: each has a scoped tool set and prompt.
+3.  **Graph state** — shared `GraphState` (messages, current worker, pending action, etc.) checkpointed per `thread_id` via `AsyncSqliteSaver`.
 
 ### Human-In-The-Loop (HITL)
-Security is paramount. The graph includes interrupt points before sensitive tool executions. The UI presents an approval card to the user, who must explicitly "Approve" or "Reject" the action before the agent proceeds.
+
+When a worker proposes a sensitive tool call (e.g. `write_file`, destructive shell commands), the graph stops and emits an `approval_required` event over SSE. The UI shows an approval card; the user clicks Approve or Deny, which POSTs to `/api/approve` or `/api/deny` and resumes the graph.
 
 ---
 
 ## Getting Started
 
 ### Prerequisites
-- [Node.js](https://nodejs.org/) (Latest LTS recommended)
-- [Ollama](https://ollama.com/) (For local intelligence and privacy features)
-- Google Gemini API Key
+- [Node.js](https://nodejs.org/) (LTS) + `npm`
+- [Python](https://www.python.org/) ≥ 3.13
+- [uv](https://docs.astral.sh/uv/getting-started/installation/) (Python package manager — installs + runs the backend)
+- [Ollama](https://ollama.com/) (optional, for local-model workers)
+- A Google Gemini API key
 
 ### Installation
 
-1.  **Clone the repository:**
+1.  **Clone the repository**
     ```bash
     git clone https://github.com/SalmanNouman/VerbOS.git
     cd VerbOS
     ```
 
-2.  **Install dependencies:**
+2.  **Install renderer dependencies**
     ```bash
     npm install
     ```
 
-3.  **Configure environment variables:**
-    Create a `.env` file in the root directory:
+3.  **Install backend dependencies**
+    ```bash
+    cd backend
+    uv sync
+    cd ..
+    ```
+    `uv sync` creates a `.venv` in `backend/` from `pyproject.toml` + `uv.lock`.
+
+4.  **Configure environment variables**
+    Create a `.env` file in the repo root:
     ```env
     GOOGLE_API_KEY=your_gemini_api_key_here
     ```
 
 ### Running the App
 
-- **Building Project:**
-  ```bash
-  npm run build
-  npm run build:electron
-  ```
-  - **Run Ollama instance:**
-  ```bash
-  ollama run llama3.2
-  ```
-  
-- **Development Mode:**
+- **Development mode** (Vite + Electron + auto-spawned Python backend):
   ```bash
   npm run dev
   ```
-  This starts the Vite development server and launches the Electron application simultaneously.
-  
-- **Packaging:**
+  Electron's main process (`electron/main/PythonManager.ts`) will `uv run backend/server.py --port 8000` for you — you don't need to start the backend manually.
+
+- **Optional: local models via Ollama**
+  ```bash
+  ollama run llama3.2
+  ```
+
+- **Running the backend on its own** (useful for iterating on the agent without Electron):
+  ```bash
+  cd backend
+  uv run server.py --port 8000
+  # then hit http://127.0.0.1:8000/health
+  ```
+
+- **Tests (backend):**
+  ```bash
+  cd backend
+  uv run pytest
+  ```
+
+- **Packaging a distributable:**
   ```bash
   npm run dist
   ```
+
+### Calling the agent from renderer code
+
+The preload exposes a `window.verbos` API.
+
+```ts
+// Send a prompt and subscribe to streamed events.
+window.verbos.onAgentEvent((event) => {
+  // event.type is one of: 'status' | 'tool' | 'tool_result'
+  //                     | 'response' | 'approval_required' | 'error' | 'done'
+  console.log(event);
+});
+await window.verbos.askAgent(currentSessionId, 'List files in my home directory');
+```
+
+The full typed surface lives in <a href="./src/types/verbos.d.ts"><code>src/types/verbos.d.ts</code></a>.
 
 ---
 
 ## Roadmap
 
-- [x] **Phase 1: Foundation** - Secured Electron + Vite + React Boilerplate.
-- [x] **Phase 2: The Brain** - LangChain & Gemini integration with streaming.
-- [x] **Phase 3: The Hands** - Core OS tools (FileTool, SystemTool).
-- [x] **Phase 4: Persistence** - SQLite session management and smart context.
-- [x] **Phase 5: Polish for Alpha version** - UI Polish, session switching.
-- [x] **Phase 6** - Quality improvements, enhanced error handling, and more tools.
-- [x] **Phase 7** - Better agentic model orchestration.
-- [ ] **Current Focus** - Parallel agents, Workspace Instances.
-- [ ] **Future Focus** - Settings, Preferences, and other user facing switches.
-
----
-
-## Security Principles
-
-1.  **Least Privilege:** Every tool has restricted access to specific OS primitives.
-2.  **Path Validation:** File operations are validated to prevent unauthorized access.
-3.  **Sanitized Context:** Local models ensure sensitive data is summarized before leaving the device.
-4.  **No `nodeIntegration`:** Renderer is strictly sandboxed.
-
----
-This project is licensed under the [MIT License](LICENSE).
-
-[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=SalmanNouman_AugOS&metric=alert_status&token=6d301ab1cd42712a72a6ced60a1511de068664f8)](https://sonarcloud.io/summary/new_code?id=SalmanNouman_AugOS)
+- [x] **Phase 1: Foundation** — Secured Electron + Vite + React boilerplate.
+- [x] **Phase 2: The Brain** — LangChain + Gemini integration with streaming.
+- [x] **Phase 3: The Hands** — Core OS tools (FileTool, SystemTool).
+- [x] **Phase 4: Persistence** — SQLite session management and smart context.
+- [x] **Phase 5: Polish for Alpha version** — UI polish, session switching.
+- [x] **Phase 6** — Quality improvements, enhanced error handling, and more tools.
+- [x] **Phase 7** — Better agentic model orchestration.
