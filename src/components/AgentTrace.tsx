@@ -60,6 +60,14 @@ interface AgentTraceProps {
 const ROUTING_PATTERN = /^Routing to (.+?)\.\.\.$/;
 const NEXT_PATTERN = /^Next: (.+)$/;
 
+// Monotonic counter for generating unique trace-step ids. These ids are only
+// used as React keys and for targeted updates — no security or entropy
+// requirement — so a process-local counter is sufficient and avoids the
+// `Math.random()` "weak pseudorandom" lint flag.
+let _stepCounter = 0;
+const nextStepId = (prefix: string = 'step') =>
+  `${prefix}-${++_stepCounter}`;
+
 /**
  * Translate an `AgentEvent` into zero-or-more trace-step mutations.
  *
@@ -69,7 +77,7 @@ const NEXT_PATTERN = /^Next: (.+)$/;
  */
 export function reduceTrace(prev: TraceStep[], event: AgentEvent): TraceStep[] {
   const now = Date.now();
-  const nextId = () => `step-${now}-${Math.random().toString(36).slice(2, 8)}`;
+  const nextId = () => nextStepId();
 
   switch (event.type) {
     case 'status': {
@@ -144,9 +152,13 @@ export function reduceTrace(prev: TraceStep[], event: AgentEvent): TraceStep[] {
     }
 
     case 'tool_result': {
-      // Attach the result to the most recent pending tool step.
+      // Attach the result to the oldest pending tool step. `tool` events emit
+      // tools in dispatch order and `tool_result` events arrive in the same
+      // order, so matching oldest-first pairs each result with its own tool.
+      // A backward scan would mis-assign results when multiple tools are
+      // dispatched in one event (A, B, C → results for A get attached to C).
       const updated = [...prev];
-      for (let i = updated.length - 1; i >= 0; i--) {
+      for (let i = 0; i < updated.length; i++) {
         const step = updated[i];
         if (step.kind === 'tool' && step.status === 'pending' && !step.toolResult) {
           updated[i] = { ...step, status: 'ok', toolResult: event.message };
@@ -240,7 +252,7 @@ export function startTurn(prev: TraceStep[], userMessage: string): TraceStep[] {
   return [
     ...prev,
     {
-      id: `turn-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      id: nextStepId('turn'),
       kind: 'turn',
       timestamp: Date.now(),
       label: 'User',
