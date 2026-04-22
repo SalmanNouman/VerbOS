@@ -58,10 +58,13 @@ _MODERATE_COMMAND_BASES: frozenset[str] = frozenset({
     "git", "npm", "npx", "yarn", "pnpm", "pip", "curl", "wget",
 })
 
+# Subcommands are only "safe" if they're strictly read-only. Mutating subcommands
+# like `git config core.hooksPath <evil>` or `git reset --hard` must fall through
+# to the "sensitive" default so HITL can gate them.
 _SAFE_SUBCOMMANDS: dict[str, frozenset[str]] = {
     "git": frozenset({
         "status", "log", "diff", "branch", "remote", "show",
-        "ls-files", "ls-tree", "config",
+        "ls-files", "ls-tree",
     }),
     "npm": frozenset({"list", "ls", "view", "info", "search", "outdated", "audit"}),
     "yarn": frozenset({"list", "info", "audit", "outdated"}),
@@ -74,10 +77,15 @@ def classify_command(command: str) -> SensitivityLevel:
     """
     Classify a shell command string by sensitivity.
 
-    Returns "safe" for pure read-only commands with no output redirection,
-    "moderate" for network/package/VCS commands that don't mutate the system
-    (e.g. `curl http://...`, `git status`, `npm list`), and "sensitive" for
-    anything that could install software, write files, or was unrecognized.
+    Returns:
+        "safe":       pure read-only commands with no shell operators
+                      (`ls`, `cat foo`, `git status`, `npm list`).
+        "moderate":   network-egress commands that don't mutate local state
+                      (`curl http://...`, `wget http://...`).
+        "sensitive":  anything that mutates state, uses shell operators that
+                      can escape the base command (`>`, `|`, `;`, backticks,
+                      `$(...)`, etc.), has a mutating subcommand (`git push`,
+                      `npm install`, `git config <write>`), or is unknown.
     """
     if not command or not isinstance(command, str):
         return "sensitive"
@@ -88,18 +96,21 @@ def classify_command(command: str) -> SensitivityLevel:
 
     command_base = trimmed.split()[0]
 
-    # Anything with output redirection mutates state → at least moderate.
-    has_redirect = ">" in trimmed
+    # Output redirection (>, >>), pipes, and command substitution can write to
+    # disk or invoke an arbitrary second command, so they must always require
+    # HITL approval — even when the base command looks read-only.
+    if _has_unsafe_shell_operators(trimmed):
+        return "sensitive"
 
     if command_base in _SAFE_COMMAND_BASES:
-        return "moderate" if has_redirect else "safe"
+        return "safe"
 
     if command_base in _MODERATE_COMMAND_BASES:
         parts = trimmed.split()
         subcommand = parts[1] if len(parts) > 1 else None
 
         safe_subcommands = _SAFE_SUBCOMMANDS.get(command_base, frozenset())
-        if subcommand in safe_subcommands and not has_redirect:
+        if subcommand in safe_subcommands:
             return "safe"
 
         # curl/wget are "moderate": they egress data and can be used to fetch
@@ -111,6 +122,18 @@ def classify_command(command: str) -> SensitivityLevel:
         return "sensitive"
 
     return "sensitive"
+
+
+# Shell metacharacters that let a command escape its base operation (write to
+# disk, pipe into another binary, or run a substituted command). Presence of
+# any of these flips classification to "sensitive" regardless of command_base.
+_UNSAFE_SHELL_OPERATORS: tuple[str, ...] = (
+    ">", "<", "|", ";", "&", "`", "$(",
+)
+
+
+def _has_unsafe_shell_operators(command: str) -> bool:
+    return any(op in command for op in _UNSAFE_SHELL_OPERATORS)
 
 
 def classify_tool(tool_name: str, tool_args: dict | None = None) -> SensitivityLevel:

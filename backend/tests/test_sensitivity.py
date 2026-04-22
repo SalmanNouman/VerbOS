@@ -43,11 +43,48 @@ class TestClassifyCommand:
         from agent.sensitivity import classify_command
         assert classify_command(command) == "moderate"
 
-    def test_output_redirection_upgrades_safe_to_moderate(self):
+    def test_output_redirection_is_sensitive(self):
+        """
+        Regression: previously safe-base + `>` was downgraded to "moderate",
+        which bypassed HITL for `echo pwned > /etc/important_file`. Any
+        redirection must require approval since it writes to disk.
+        """
         from agent.sensitivity import classify_command
-        # `echo foo` is safe, but `echo foo > file` writes to disk.
         assert classify_command("echo hello") == "safe"
-        assert classify_command("echo hello > /tmp/x") == "moderate"
+        assert classify_command("echo hello > /tmp/x") == "sensitive"
+        assert classify_command("echo hello >> /tmp/x") == "sensitive"
+        assert classify_command("cat /etc/hostname > /tmp/x") == "sensitive"
+
+    @pytest.mark.parametrize("command", [
+        "ls | sh",
+        "ls; rm -rf /",
+        "ls && rm -rf /",
+        "ls `whoami`",
+        "ls $(whoami)",
+        "cat < /tmp/evil",
+    ])
+    def test_unsafe_shell_operators_force_sensitive(self, command):
+        """
+        Regression: shell metacharacters (pipe, semicolon, command
+        substitution, etc.) must escalate even a safe-base command to
+        "sensitive" so the escape hatch can't be used to smuggle mutations.
+        """
+        from agent.sensitivity import classify_command
+        assert classify_command(command) == "sensitive"
+
+    @pytest.mark.parametrize("command", [
+        "git config core.hooksPath /tmp/evil",
+        "git config alias.x '!rm -rf /'",
+        "git config user.email attacker@example.com",
+    ])
+    def test_git_config_is_sensitive(self, command):
+        """
+        Regression: `git config` was previously in the safe subcommand list,
+        but it can write arbitrary config values (including hook paths that
+        redirect execution or malicious aliases). It must always be sensitive.
+        """
+        from agent.sensitivity import classify_command
+        assert classify_command(command) == "sensitive"
 
     @pytest.mark.parametrize("command", [
         "npm install express",
@@ -107,6 +144,7 @@ class TestClassifyTool:
         assert classify_tool("execute_shell_command", {"command": "ls"}) == "safe"
         assert classify_tool("execute_shell_command", {"command": "curl https://x"}) == "moderate"
         assert classify_tool("execute_shell_command", {"command": "npm install"}) == "sensitive"
+        assert classify_tool("execute_shell_command", {"command": "echo x > /tmp/y"}) == "sensitive"
 
     def test_shell_tool_with_missing_args_is_sensitive(self):
         from agent.sensitivity import classify_tool
