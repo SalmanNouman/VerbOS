@@ -58,9 +58,13 @@ def _is_blocked(path: Path) -> bool:
 
 def validate_path(requested_path: str) -> Path:
     """
-    Validates if a path is safe to access.
-    Returns the validated absolute path.
-    Raises ValueError if path is not allowed.
+    Validates if a path is safe to access and returns the validated absolute path.
+
+    Raises:
+        ValueError: if `requested_path` is empty.
+        FileNotFoundError: if the resolved path does not exist.
+        PermissionError: if the resolved path is blocked or falls outside
+            the configured allow-list (user home + project directory).
     """
     if not requested_path:
         raise ValueError("Path cannot be empty")
@@ -135,8 +139,10 @@ def validate_write_path(path: str) -> Path:
     parent_dir = resolved_path.parent
     try:
         validate_directory_path(str(parent_dir))
-    except FileNotFoundError:
-        raise ValueError(f"Operation Failed: The parent directory '{parent_dir}' does not exist.")
+    except FileNotFoundError as err:
+        raise ValueError(
+            f"Operation Failed: The parent directory '{parent_dir}' does not exist."
+        ) from err
 
     if _is_blocked(resolved_path):
         raise PermissionError(
