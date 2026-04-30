@@ -16,6 +16,8 @@ import {
 } from 'lucide-react';
 import './index.css';
 
+const verbosApi = () => globalThis.window.verbos;
+
 function App() {
   const [isConnected, setIsConnected] = useState(false);
   const [activeTab, setActiveTab] = useState('chat');
@@ -25,11 +27,10 @@ function App() {
 
   useEffect(() => {
     const checkConnection = async () => {
+      const verbos = verbosApi();
       try {
-        if (window.verbos) {
-          await window.verbos.ping();
-          setIsConnected(true);
-        }
+        await verbos?.ping();
+        setIsConnected(Boolean(verbos));
       } catch (err) {
         console.error('Connection failed:', err);
         setIsConnected(false);
@@ -39,9 +40,10 @@ function App() {
   }, []);
 
   const loadHistory = useCallback(async () => {
-    if (!window.verbos) return;
+    const verbos = verbosApi();
+    if (!verbos) return;
     try {
-      const history = await window.verbos.history.list();
+      const history = await verbos.history.list();
       setChatHistory(history);
     } catch (err) {
       console.error('Failed to load history:', err);
@@ -50,16 +52,17 @@ function App() {
 
   useEffect(() => {
     const initSession = async () => {
-      if (!window.verbos || !isConnected) return;
+      const verbos = verbosApi();
+      if (!verbos || !isConnected) return;
 
       await loadHistory();
 
-      const history = await window.verbos.history.list();
+      const history = await verbos.history.list();
       if (history.length > 0) {
-        const session = await window.verbos.history.load(history[0].id);
+        const session = await verbos.history.load(history[0].id);
         if (session) setCurrentSession(session);
       } else {
-        const session = await window.verbos.history.create();
+        const session = await verbos.history.create();
         setCurrentSession(session);
       }
     };
@@ -67,9 +70,10 @@ function App() {
   }, [isConnected, loadHistory]);
 
   const createNewChat = async () => {
-    if (!window.verbos) return;
+    const verbos = verbosApi();
+    if (!verbos) return;
     try {
-      const session = await window.verbos.history.create();
+      const session = await verbos.history.create();
       setCurrentSession(session);
       await loadHistory();
       setActiveTab('chat');
@@ -79,9 +83,10 @@ function App() {
   };
 
   const loadChat = async (id: string) => {
-    if (!window.verbos) return;
+    const verbos = verbosApi();
+    if (!verbos) return;
     try {
-      const session = await window.verbos.history.load(id);
+      const session = await verbos.history.load(id);
       if (session) {
         setCurrentSession(session);
         setActiveTab('chat');
@@ -92,9 +97,10 @@ function App() {
   };
 
   const updateTitle = async (sessionId: string, title: string) => {
-    if (!window.verbos) return;
+    const verbos = verbosApi();
+    if (!verbos) return;
     try {
-      await window.verbos.history.updateTitle(sessionId, title);
+      await verbos.history.updateTitle(sessionId, title);
       await loadHistory();
       if (currentSession?.id === sessionId) {
         setCurrentSession( prev => prev ? { ...prev, title } : null);
@@ -105,19 +111,20 @@ function App() {
   };
 
   const deleteChat = async (id: string) => {
-    if (!window.verbos) return;
+    const verbos = verbosApi();
+    if (!verbos) return;
     try {
-      await window.verbos.history.delete(id);
+      await verbos.history.delete(id);
       
       // Refresh history first to see what's left
-      const updatedHistory = await window.verbos.history.list();
+      const updatedHistory = await verbos.history.list();
       setChatHistory(updatedHistory);
 
       // If we deleted the active chat, switch to another one
       if (currentSession?.id === id) {
         if (updatedHistory.length > 0) {
           // Switch to the most recent conversation (usually the first one)
-          const nextSession = await window.verbos.history.load(updatedHistory[0].id);
+          const nextSession = await verbos.history.load(updatedHistory[0].id);
           if (nextSession) setCurrentSession(nextSession);
         } else {
           // No chats left, create a new one
@@ -140,6 +147,7 @@ function App() {
 
           <nav className="flex flex-col gap-3">
             <button
+              type="button"
               onClick={() => setActiveTab('chat')}
               className={`group relative p-3 rounded-xl transition-all duration-300 ${activeTab === 'chat' ? 'text-brand-primary' : 'text-text-muted hover:text-text-primary hover:bg-surface-raised'}`}
               title="Chat Workspace"
@@ -148,6 +156,7 @@ function App() {
             </button>
 
             <button
+              type="button"
               onClick={() => setShowHistory(!showHistory)}
               className={`group relative p-3 rounded-xl transition-all duration-300 ${showHistory ? 'text-brand-primary' : 'text-text-muted hover:text-text-primary hover:bg-surface-raised'}`}
               title="History"
@@ -205,32 +214,29 @@ function App() {
                   {chatHistory.map((chat) => (
                     <div
                       key={chat.id}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => loadChat(chat.id)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault();
-                          loadChat(chat.id);
-                        }
-                      }}
-                      className={`group flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all duration-200 border outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/50 ${currentSession?.id === chat.id
+                      className={`group flex items-center rounded-xl transition-all duration-200 border ${currentSession?.id === chat.id
                         ? 'bg-brand-primary/10 border-brand-primary/20 text-text-primary'
                         : 'border-transparent hover:bg-surface-raised hover:border-border-subtle text-text-secondary hover:text-text-primary'
                         }`}
                     >
-                      <div className={`p-2 rounded-lg ${currentSession?.id === chat.id ? 'bg-brand-primary text-background' : 'bg-surface-raised text-text-muted group-hover:bg-surface-overlay'}`}>
-                        <MessageSquare size={14} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{chat.title}</p>
-                        <p className="text-[10px] text-text-dim mt-0.5">{chat.date}</p>
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => loadChat(chat.id)}
+                        className="flex flex-1 min-w-0 items-center gap-3 p-3 text-left rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-brand-primary/50"
+                      >
+                        <span className={`p-2 rounded-lg ${currentSession?.id === chat.id ? 'bg-brand-primary text-background' : 'bg-surface-raised text-text-muted group-hover:bg-surface-overlay'}`}>
+                          <MessageSquare size={14} />
+                        </span>
+                        <span className="flex-1 min-w-0">
+                          <span className="block text-sm font-medium truncate">{chat.title}</span>
+                          <span className="block text-[10px] text-text-dim mt-0.5">{chat.date}</span>
+                        </span>
+                      </button>
                       <button
                         type="button"
                         aria-label={`Delete chat ${chat.title}`}
                         onClick={(e) => { e.stopPropagation(); deleteChat(chat.id); }}
-                        className="opacity-0 group-hover:opacity-100 p-1.5 text-text-muted hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-all"
+                        className="mr-3 opacity-0 group-hover:opacity-100 p-1.5 text-text-muted hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-all"
                       >
                         <Trash2 size={14} />
                       </button>
