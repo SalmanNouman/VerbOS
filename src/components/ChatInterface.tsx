@@ -397,7 +397,7 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
               const nameColor = msg.role === 'user' ? 'text-brand-secondary' : 'text-brand-primary';
               return (
                 <div
-                  key={`${msg.role}-${index}-${msg.content.length}`}
+                  key={`${msg.role}-${index}`}
                   className={`flex ${bubbleAlignment} group`}
                 >
                   <div className={`flex flex-col gap-1.5 max-w-[80%] ${messageAlignment}`}>
