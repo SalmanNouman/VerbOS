@@ -35,9 +35,47 @@ interface ChatInterfaceProps {
 }
 
 interface ToolLog {
+  id: string;
   name: string;
-  args: any;
+  args: unknown;
   result?: string;
+}
+
+const MESSAGE_ROLE_CLASSES = {
+  user: 'bg-brand-primary text-background font-medium',
+  assistant: 'bg-surface-raised text-text-secondary border border-border/50 hover:border-brand-primary/20',
+  error: 'bg-red-500/5 text-red-600 border border-red-500/20',
+};
+
+function isErrorMessage(content: string) {
+  return content.includes('Error:') || content.includes('❌ Failed:') || content.includes('Agent logic reached session threshold');
+}
+
+function appendOrReplaceAssistantMessage(messages: Message[], content: string): Message[] {
+  const updated = [...messages];
+  const lastMessage = updated[updated.length - 1];
+
+  if (lastMessage?.role === 'assistant') {
+    updated[updated.length - 1] = { ...lastMessage, content };
+  } else {
+    updated.push({ role: 'assistant', content });
+  }
+
+  return updated;
+}
+
+function messageBubbleClassName(message: Message): string {
+  if (message.role === 'user') {
+    return MESSAGE_ROLE_CLASSES.user;
+  }
+
+  return isErrorMessage(message.content)
+    ? MESSAGE_ROLE_CLASSES.error
+    : MESSAGE_ROLE_CLASSES.assistant;
+}
+
+function shortenLogResult(result: string): string {
+  return result.length > 300 ? `${result.slice(0, 300)}...` : result;
 }
 
 export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfaceProps) {
@@ -55,6 +93,25 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const resetLoadingState = () => {
+    setIsLoading(false);
+    setStatusMessage(null);
+    setAgentState('idle');
+  };
+
+  const removeStreamListeners = () => {
+    globalThis.window.verbos?.removeAgentEventListener();
+    globalThis.window.verbos?.removeStreamEndListener();
+  };
+
+  const registerStreamListeners = () => {
+    globalThis.window.verbos?.onAgentEvent(handleAgentEvent);
+    globalThis.window.verbos?.onStreamEnd(() => {
+      resetLoadingState();
+      removeStreamListeners();
+    });
+  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -75,6 +132,28 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
     setTrace([]);
   }, [currentSession?.id]);
 
+  const appendToolLogs = (tools: Array<{ name: string; args: unknown }>) => {
+    const newLogs = tools.map((tool, index) => ({
+      id: `${Date.now()}-${tool.name}-${index}`,
+      name: tool.name,
+      args: tool.args,
+    }));
+    setToolLogs(prev => [...prev, ...newLogs]);
+  };
+
+  const updateLastPendingToolResult = (result: string) => {
+    setToolLogs(prev => {
+      const pendingIndex = prev.findLastIndex(log => !log.result);
+      if (pendingIndex === -1) {
+        return prev;
+      }
+
+      const nextLogs = [...prev];
+      nextLogs[pendingIndex] = { ...nextLogs[pendingIndex], result };
+      return nextLogs;
+    });
+  };
+
   const handleAgentEvent = (event: AgentEvent) => {
     setTrace(prev => reduceTrace(prev, event));
 
@@ -84,36 +163,17 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
         setAgentState('thinking');
         break;
       case 'tool':
-        setStatusMessage(event.message); // "Using tools: ..."
+        setStatusMessage(event.message);
         setAgentState('executing');
         if (event.tools) {
-          const newLogs = event.tools.map(t => ({ name: t.name, args: t.args }));
-          setToolLogs(prev => [...prev, ...newLogs]);
+          appendToolLogs(event.tools);
         }
         break;
       case 'tool_result':
-        setToolLogs(prev => {
-          const copy = [...prev];
-          const last = copy[copy.length - 1];
-          if (last && !last.result) {
-            last.result = event.message;
-          }
-          return copy;
-        });
+        updateLastPendingToolResult(event.message);
         break;
       case 'response':
-        setMessages(prev => {
-          const updated = [...prev];
-          const lastMsg = updated[updated.length - 1];
-
-          // Check if we need to append a new message or update existing
-          if (lastMsg && lastMsg.role === 'assistant') {
-            updated[updated.length - 1] = { ...lastMsg, content: event.message };
-          } else {
-            updated.push({ role: 'assistant', content: event.message });
-          }
-          return updated;
-        });
+        setMessages(prev => appendOrReplaceAssistantMessage(prev, event.message));
         setStatusMessage(null);
         setAgentState('idle');
         break;
@@ -124,16 +184,7 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
         setAgentState('idle');
         break;
       case 'error':
-        setMessages(prev => {
-          const updated = [...prev];
-          const lastMsg = updated[updated.length - 1];
-          if (lastMsg && lastMsg.role === 'assistant') {
-            updated[updated.length - 1] = { ...lastMsg, content: `Error: ${event.message}` };
-          } else {
-            updated.push({ role: 'assistant', content: `Error: ${event.message}` });
-          }
-          return updated;
-        });
+        setMessages(prev => appendOrReplaceAssistantMessage(prev, `Error: ${event.message}`));
         setStatusMessage(null);
         setAgentState('idle');
         break;
@@ -156,28 +207,16 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
     setTrace(prev => startTurn(prev, text));
 
     try {
-      if (window.verbos && window.verbos.askAgent) {
-        window.verbos.onAgentEvent(handleAgentEvent);
-
-        window.verbos?.onStreamEnd(async () => {
-          setIsLoading(false);
-          setStatusMessage(null);
-          setAgentState('idle');
-          window.verbos?.removeAgentEventListener();
-          window.verbos?.removeStreamEndListener();
-        });
-
-        await window.verbos.askAgent(currentSession.id, text);
+      if (globalThis.window.verbos?.askAgent) {
+        registerStreamListeners();
+        await globalThis.window.verbos.askAgent(currentSession.id, text);
       } else {
-        // Fallback for dev/demo without backend
         setTimeout(async () => {
           setMessages(prev => [...prev, {
             role: 'assistant',
             content: `I received: "${text}". Connect to VerbOS backend for full functionality.`
           }]);
-          setIsLoading(false);
-          setStatusMessage(null);
-          setAgentState('idle');
+          resetLoadingState();
         }, 800);
       }
     } catch (error) {
@@ -186,9 +225,7 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
         role: 'assistant',
         content: `Error: Failed to contact agent. Please ensure the backend is running.`
       }]);
-      setIsLoading(false);
-      setStatusMessage(null);
-      setAgentState('idle');
+      resetLoadingState();
     }
   };
 
@@ -202,23 +239,12 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
     setTrace(prev => resolveLastApproval(prev, 'approved'));
 
     try {
-      await window.verbos?.approveAction(currentSession.id);
-
-      window.verbos?.onAgentEvent(handleAgentEvent);
-      window.verbos?.onStreamEnd(() => {
-        setIsLoading(false);
-        setStatusMessage(null);
-        setAgentState('idle');
-        window.verbos?.removeAgentEventListener();
-        window.verbos?.removeStreamEndListener();
-      });
-
-      await window.verbos?.resumeAgent(currentSession.id);
+      await globalThis.window.verbos?.approveAction(currentSession.id);
+      registerStreamListeners();
+      await globalThis.window.verbos?.resumeAgent(currentSession.id);
     } catch (error) {
       console.error('Approval error:', error);
-      setIsLoading(false);
-      setStatusMessage(null);
-      setAgentState('idle');
+      resetLoadingState();
     }
   };
 
@@ -232,23 +258,12 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
     setTrace(prev => resolveLastApproval(prev, 'denied'));
 
     try {
-      await window.verbos?.denyAction(currentSession.id, 'User denied the action');
-
-      window.verbos?.onAgentEvent(handleAgentEvent);
-      window.verbos?.onStreamEnd(() => {
-        setIsLoading(false);
-        setStatusMessage(null);
-        setAgentState('idle');
-        window.verbos?.removeAgentEventListener();
-        window.verbos?.removeStreamEndListener();
-      });
-
-      await window.verbos?.resumeAgent(currentSession.id);
+      await globalThis.window.verbos?.denyAction(currentSession.id, 'User denied the action');
+      registerStreamListeners();
+      await globalThis.window.verbos?.resumeAgent(currentSession.id);
     } catch (error) {
       console.error('Deny error:', error);
-      setIsLoading(false);
-      setStatusMessage(null);
-      setAgentState('idle');
+      resetLoadingState();
     }
   };
 
@@ -279,10 +294,6 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
   const handleRetry = async () => {
     if (!lastInput || isLoading || !currentSession) return;
     await sendMessage(lastInput);
-  };
-
-  const isErrorMessage = (content: string) => {
-    return content.includes('Error:') || content.includes('❌ Failed:') || content.includes('Agent logic reached session threshold');
   };
 
   return (
@@ -319,7 +330,7 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
               const isError = isErrorMessage(msg.content);
               return (
                 <div
-                  key={index}
+                  key={`${msg.role}-${index}-${msg.content.length}`}
                   className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} group`}
                 >
                   <div className={`flex flex-col gap-1.5 max-w-[80%] ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
@@ -329,12 +340,7 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
                       </span>
                     </div>
                     <div
-                      className={`rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-md transition-all hover:shadow-lg ${msg.role === 'user'
-                        ? 'bg-brand-primary text-background font-medium'
-                        : isError
-                          ? 'bg-red-500/5 text-red-600 border border-red-500/20'
-                          : 'bg-surface-raised text-text-secondary border border-border/50 hover:border-brand-primary/20'
-                        }`}
+                      className={`rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-md transition-all hover:shadow-lg ${messageBubbleClassName(msg)}`}
                     >
                       {isError && msg.role === 'assistant' && (
                         <div className="flex items-center gap-2 mb-2 text-red-500 font-semibold text-xs uppercase tracking-wide">
@@ -416,8 +422,8 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
                   {/* Collapsible Tool Logs */}
                   {showToolLogs && toolLogs.length > 0 && (
                     <div className="mt-3 pt-3 border-t border-border/30 space-y-3 animate-in fade-in slide-in-from-top-1">
-                      {toolLogs.map((log, i) => (
-                        <div key={i} className="text-xs">
+                      {toolLogs.map((log) => (
+                        <div key={log.id} className="text-xs">
                           <div className="flex items-center gap-2 text-text-dim mb-1 font-mono">
                             <ChevronRight size={10} />
                             <span className="font-semibold text-brand-secondary">{log.name}</span>
@@ -430,7 +436,7 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
                               <div className="mt-1">
                                 <div className="text-[10px] text-green-500/80 mb-0.5">Result:</div>
                                 <pre className="bg-background/50 p-2 rounded text-[10px] text-text-secondary overflow-x-auto max-h-32">
-                                  {log.result.length > 300 ? log.result.slice(0, 300) + '...' : log.result}
+                                  {shortenLogResult(log.result)}
                                 </pre>
                               </div>
                             )}

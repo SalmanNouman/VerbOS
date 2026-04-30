@@ -36,7 +36,7 @@ export interface PendingAction {
 
 export type AgentEvent =
   | { type: 'status'; message: string }
-  | { type: 'tool'; message: string; tools: Array<{ name: string; args: any }> }
+  | { type: 'tool'; message: string; tools: Array<{ name: string; args: unknown }> }
   | { type: 'tool_result'; message: string }
   | { type: 'response'; message: string }
   | { type: 'approval_required'; action: PendingAction }
