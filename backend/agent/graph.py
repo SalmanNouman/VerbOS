@@ -80,15 +80,15 @@ class VerbOSGraph:
         self._checkpointer = checkpointer
         self._graph = None
 
-        if workers:
-            self.workers = workers
-        else:
-            self.workers = {
-                WORKER_NAMES["FILESYSTEM"]: FileSystemWorker(),
-                WORKER_NAMES["SYSTEM"]: SystemWorker(),
-                WORKER_NAMES["RESEARCHER"]: ResearcherWorker(),
-                WORKER_NAMES["CODE"]: CodeWorker(),
-            }
+        self.workers = workers or self._create_default_workers()
+
+    def _create_default_workers(self) -> dict[str, BaseWorker]:
+        return {
+            WORKER_NAMES["FILESYSTEM"]: FileSystemWorker(),
+            WORKER_NAMES["SYSTEM"]: SystemWorker(),
+            WORKER_NAMES["RESEARCHER"]: ResearcherWorker(),
+            WORKER_NAMES["CODE"]: CodeWorker(),
+        }
 
     async def _ensure_graph(self):
         """Lazily initialize the graph with async checkpointer."""
@@ -123,24 +123,20 @@ class VerbOSGraph:
                 worker = self.workers[worker_name]
                 result = await worker.process(state)
 
-                current_worker = None
-                if result.awaiting_approval:
-                    current_worker = worker_name
-                elif not result.task_complete:
-                    current_worker = worker_name
-
                 return {
                     "messages": result.messages,
                     "pending_action": result.pending_action,
                     "awaiting_approval": result.awaiting_approval,
-                    "current_worker": current_worker,
+                    "current_worker": worker_name
+                    if result.awaiting_approval or not result.task_complete
+                    else None,
                     "task_complete": result.task_complete,
                     "task_summary": result.task_summary,
                     "worker_iteration_count": state["worker_iteration_count"] + 1,
                 }
             return worker_node
 
-        async def human_approval_node(state: GraphState) -> dict:
+        def human_approval_node(state: GraphState) -> dict:
             return {"awaiting_approval": False}
 
         workflow.add_node("supervisor", supervisor_node)
@@ -323,38 +319,54 @@ class VerbOSGraph:
         config = {"configurable": {"thread_id": thread_id}}
         return await self._graph.aget_state(config)
 
-    def _process_event(self, event: dict) -> list[GraphEvent]:
-        """Process raw graph events into typed GraphEvents."""
+    def _event_node_updates(self, event: dict) -> tuple[str | None, dict]:
+        node_name = next(iter(event), None)
+        if not node_name:
+            return None, {}
+        return node_name, event.get(node_name, {})
+
+    def _worker_started_event(self, node_name: str | None) -> GraphEvent | None:
+        if node_name in WORKER_NAMES.values():
+            return GraphEvent("worker_started", {"worker": node_name})
+        return None
+
+    def _routing_event(self, node_name: str | None, updates: dict) -> GraphEvent | None:
+        if node_name != NODE_NAMES["SUPERVISOR"]:
+            return None
+
+        next_node = updates.get("next")
+        if next_node and next_node != END:
+            return GraphEvent("routing", {"next": next_node})
+        return None
+
+    def _message_events(self, messages: list) -> list[GraphEvent]:
         events = []
 
-        node_name = list(event.keys())[0] if event else None
-        updates = event.get(node_name, {}) if node_name else {}
+        for msg in messages:
+            if hasattr(msg, "tool_calls") and msg.tool_calls:
+                events.append(GraphEvent("tool_call", {
+                    "tools": [
+                        {"name": tc.get("name"), "args": tc.get("args")}
+                        for tc in msg.tool_calls
+                    ]
+                }))
 
-        if not node_name or not updates:
-            return events
-
-        if node_name in WORKER_NAMES.values():
-            events.append(GraphEvent("worker_started", {"worker": node_name}))
-
-        if node_name == NODE_NAMES["SUPERVISOR"]:
-            next_node = updates.get("next")
-            if next_node and next_node != END:
-                events.append(GraphEvent("routing", {"next": next_node}))
-
-        messages = updates.get("messages", [])
-        if messages:
-            for msg in messages:
-                if hasattr(msg, "tool_calls") and msg.tool_calls:
-                    events.append(GraphEvent("tool_call", {
-                        "tools": [
-                            {"name": tc.get("name"), "args": tc.get("args")}
-                            for tc in msg.tool_calls
-                        ]
-                    }))
-
-                if isinstance(msg, ToolMessage):
-                    events.append(GraphEvent("tool_result", {
-                        "result": str(msg.content),
-                    }))
+            if isinstance(msg, ToolMessage):
+                events.append(GraphEvent("tool_result", {
+                    "result": str(msg.content),
+                }))
 
         return events
+
+    def _process_event(self, event: dict) -> list[GraphEvent]:
+        """Process raw graph events into typed GraphEvents."""
+        node_name, updates = self._event_node_updates(event)
+        if not node_name or not updates:
+            return []
+
+        optional_events = [
+            self._worker_started_event(node_name),
+            self._routing_event(node_name, updates),
+        ]
+        events = [event for event in optional_events if event]
+        return events + self._message_events(updates.get("messages", []))
