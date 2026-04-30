@@ -325,6 +325,37 @@ function statusBadge(status?: TraceStepStatus) {
   }
 }
 
+function sensitivityBadge(sensitivity?: TraceStep['sensitivity']) {
+  if (!sensitivity) return null;
+
+  const classes = {
+    sensitive: 'bg-red-500/10 text-red-400',
+    moderate: 'bg-amber-500/10 text-amber-400',
+    safe: 'bg-emerald-500/10 text-emerald-400',
+  };
+
+  return (
+    <span className={`text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded ${classes[sensitivity]}`}>
+      {sensitivity}
+    </span>
+  );
+}
+
+function truncateToolResult(result: string): string {
+  return result.length > 600 ? `${result.slice(0, 600)}\n... [truncated]` : result;
+}
+
+function ToolResultPreview({ result }: { result: string }) {
+  return (
+    <div>
+      <div className="text-[9px] text-emerald-400/80 mb-0.5 uppercase tracking-wider">Result</div>
+      <pre className="bg-background/60 border border-border/30 rounded p-2 text-[10px] text-text-secondary whitespace-pre-wrap overflow-x-auto max-h-40">
+        {truncateToolResult(result)}
+      </pre>
+    </div>
+  );
+}
+
 function TraceStepCard({ step }: { step: TraceStep }) {
   const [expanded, setExpanded] = useState(false);
   const hasExpandable = Boolean(step.detail || step.toolArgs || step.toolResult);
@@ -347,19 +378,7 @@ function TraceStepCard({ step }: { step: TraceStep }) {
                 <span className="text-[10px] text-text-muted font-mono">{step.next}</span>
               </>
             )}
-            {step.sensitivity && (
-              <span
-                className={`text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded ${
-                  step.sensitivity === 'sensitive'
-                    ? 'bg-red-500/10 text-red-400'
-                    : step.sensitivity === 'moderate'
-                    ? 'bg-amber-500/10 text-amber-400'
-                    : 'bg-emerald-500/10 text-emerald-400'
-                }`}
-              >
-                {step.sensitivity}
-              </span>
-            )}
+            {sensitivityBadge(step.sensitivity)}
             {statusBadge(step.status)}
           </div>
 
@@ -388,16 +407,7 @@ function TraceStepCard({ step }: { step: TraceStep }) {
                   </pre>
                 </div>
               )}
-              {step.toolResult && (
-                <div>
-                  <div className="text-[9px] text-emerald-400/80 mb-0.5 uppercase tracking-wider">Result</div>
-                  <pre className="bg-background/60 border border-border/30 rounded p-2 text-[10px] text-text-secondary whitespace-pre-wrap overflow-x-auto max-h-40">
-                    {step.toolResult.length > 600
-                      ? step.toolResult.slice(0, 600) + '\n... [truncated]'
-                      : step.toolResult}
-                  </pre>
-                </div>
-              )}
+              {step.toolResult && <ToolResultPreview result={step.toolResult} />}
             </div>
           )}
         </div>

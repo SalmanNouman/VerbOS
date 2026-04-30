@@ -183,6 +183,8 @@ function App() {
             <div className="flex items-center justify-between mb-8">
               <h2 className="text-lg font-display font-bold text-text-primary tracking-tight">Conversations</h2>
               <button
+                type="button"
+                aria-label="Create new chat"
                 onClick={createNewChat}
                 className="p-2 bg-brand-primary text-background rounded-lg hover:bg-brand-primary-hover transition-all shadow-lg shadow-brand-primary/20 active:scale-95"
               >
@@ -225,6 +227,8 @@ function App() {
                         <p className="text-[10px] text-text-dim mt-0.5">{chat.date}</p>
                       </div>
                       <button
+                        type="button"
+                        aria-label={`Delete chat ${chat.title}`}
                         onClick={(e) => { e.stopPropagation(); deleteChat(chat.id); }}
                         className="opacity-0 group-hover:opacity-100 p-1.5 text-text-muted hover:text-red-400 hover:bg-red-400/10 rounded-lg transition-all"
                       >
