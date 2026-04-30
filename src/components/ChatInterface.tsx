@@ -21,6 +21,13 @@ import {
   Brain
 } from 'lucide-react';
 import type { ChatSession, Message, AgentEvent, PendingAction } from '../types/verbos';
+import {
+  AgentTrace,
+  reduceTrace,
+  resolveLastApproval,
+  startTurn,
+  type TraceStep,
+} from './AgentTrace';
 
 interface ChatInterfaceProps {
   currentSession: ChatSession | null;
@@ -43,6 +50,8 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
   const [toolLogs, setToolLogs] = useState<ToolLog[]>([]);
   const [showToolLogs, setShowToolLogs] = useState(false);
   const [agentState, setAgentState] = useState<'thinking' | 'executing' | 'idle'>('idle');
+  const [trace, setTrace] = useState<TraceStep[]>([]);
+  const [showTrace, setShowTrace] = useState(true);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -61,9 +70,14 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
     } else {
       setMessages([]);
     }
+    // Trace is scoped to a session's runtime view; reset on session switch so
+    // we don't mix steps from the previous conversation with the new one.
+    setTrace([]);
   }, [currentSession?.id]);
 
   const handleAgentEvent = (event: AgentEvent) => {
+    setTrace(prev => reduceTrace(prev, event));
+
     switch (event.type) {
       case 'status':
         setStatusMessage(event.message);
@@ -139,6 +153,7 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
     setAgentState('thinking');
     setToolLogs([]);
     setShowToolLogs(false);
+    setTrace(prev => startTurn(prev, text));
 
     try {
       if (window.verbos && window.verbos.askAgent) {
@@ -184,6 +199,7 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
     setPendingAction(null);
     setStatusMessage('Executing approved action...');
     setAgentState('executing');
+    setTrace(prev => resolveLastApproval(prev, 'approved'));
 
     try {
       await window.verbos?.approveAction(currentSession.id);
@@ -213,6 +229,7 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
     setPendingAction(null);
     setStatusMessage('Action denied, continuing...');
     setAgentState('thinking');
+    setTrace(prev => resolveLastApproval(prev, 'denied'));
 
     try {
       await window.verbos?.denyAction(currentSession.id, 'User denied the action');
@@ -269,7 +286,8 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
   };
 
   return (
-    <div className="flex flex-col h-full bg-background relative">
+    <div className="flex h-full bg-background relative min-h-0">
+    <div className="flex flex-col h-full bg-background relative flex-1 min-w-0">
       {/* Messages Area - Scrollable Container */}
       <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
         {messages.length === 0 ? (
@@ -536,6 +554,15 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
           </div>
         </div>
       </div>
+    </div>
+
+      <AgentTrace
+        trace={trace}
+        isOpen={showTrace}
+        onToggle={() => setShowTrace(v => !v)}
+        onClear={() => setTrace([])}
+        isRunning={isLoading}
+      />
     </div>
   );
 }
