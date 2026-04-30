@@ -31,6 +31,28 @@ class TestPathValidation:
         with pytest.raises(ValueError, match="invalid URL encoding"):
             validate_path(path)
 
+    @pytest.mark.parametrize("path", ["safe/file\x00.txt", "safe/file%00.txt"])
+    def test_validate_path_rejects_null_bytes(self, path):
+        from tools.path_validation import validate_path
+        with pytest.raises(ValueError, match="invalid characters"):
+            validate_path(path)
+
+    def test_validate_path_preserves_whitespace(self, tmp_path, monkeypatch):
+        import tools.path_validation as pv
+
+        allowed_root = tmp_path / "workspace"
+        allowed_root.mkdir()
+        target = allowed_root / " spaced.txt "
+        target.write_text("hello")
+
+        monkeypatch.setattr(pv, "SECURITY_CONFIG", {
+            "allowed_directories": [allowed_root],
+            "blocked_paths": [],
+        })
+        monkeypatch.setattr(Path, "home", staticmethod(lambda: allowed_root))
+
+        assert pv.validate_path(" spaced.txt ") == target.resolve()
+
     def test_validate_path_blocked(self):
         """On Unix, /etc is blocked. On Windows, C:\\Windows is blocked."""
         from tools.path_validation import validate_path
@@ -83,6 +105,23 @@ class TestPathValidation:
         })
 
         assert pv.validate_path(str(target)) == target.resolve()
+
+    def test_validate_path_rejects_missing_path_outside_workspace(self, tmp_path, monkeypatch):
+        import tools.path_validation as pv
+
+        allowed_root = tmp_path / "workspace"
+        allowed_root.mkdir()
+        outside_root = tmp_path / "outside"
+        outside_root.mkdir()
+        target = outside_root / "missing.txt"
+
+        monkeypatch.setattr(pv, "SECURITY_CONFIG", {
+            "allowed_directories": [allowed_root],
+            "blocked_paths": [],
+        })
+
+        with pytest.raises(PermissionError, match="Security Violation"):
+            pv.validate_path(str(target))
 
     def test_validate_path_rejects_symlink_escape(self, tmp_path, monkeypatch):
         import tools.path_validation as pv

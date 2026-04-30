@@ -59,13 +59,16 @@ def _is_blocked(path: Path) -> bool:
 
 
 def _decode_requested_path(requested_path: str) -> str:
-    if not isinstance(requested_path, str) or not requested_path.strip():
+    if not isinstance(requested_path, str) or requested_path == "":
         raise ValueError("Path cannot be empty")
     if "\x00" in requested_path:
         raise ValueError("Path contains invalid characters")
     if re.search(r"%(?![0-9a-fA-F]{2})", requested_path):
         raise ValueError("Path contains invalid URL encoding")
-    return unquote(requested_path.strip())
+    decoded_path = unquote(requested_path)
+    if "\x00" in decoded_path:
+        raise ValueError("Path contains invalid characters")
+    return decoded_path
 
 
 def _has_windows_anchor(path: str) -> bool:
@@ -109,11 +112,12 @@ def _ensure_allowed_path(real_path: Path) -> Path:
 def validate_path(requested_path: str) -> Path:
     """Validate a readable existing path and return its resolved absolute path."""
     real_path = _resolve_requested_path(requested_path)
+    real_path = _ensure_allowed_path(real_path)
 
     if not real_path.exists():
         raise FileNotFoundError("File System Error: The requested path does not exist.")
 
-    return _ensure_allowed_path(real_path)
+    return real_path
 
 
 def validate_read_path(path: str) -> Path:
