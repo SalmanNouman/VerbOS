@@ -1,6 +1,6 @@
-import { spawnSync } from 'child_process';
-import { platform } from 'os';
-import { existsSync } from 'fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { platform } from 'node:os';
 import { GraphLogger } from './logger';
 
 /**
@@ -10,57 +10,63 @@ import { GraphLogger } from './logger';
  */
 export function resolveExecutablePath(name: string): string {
   const isWindows = platform() === 'win32';
-  
-  // names should not contain shell meta-characters
+
   if (/[&|;><`\s]/.test(name)) {
     GraphLogger.error('SYSTEM', `Invalid executable name provided: ${name}`);
     return name;
   }
-  
-  try {
-    if (isWindows) {
-      // Use absolute path to where.exe to prevent hijacking of the search utility itself
-      const wherePath = 'C:\\Windows\\System32\\where.exe';
-      if (!existsSync(wherePath)) {
-        GraphLogger.warn('SYSTEM', `System utility ${wherePath} not found, falling back to bare name`);
-        return name;
-      }
-      
-      const result = spawnSync(wherePath, [name], { 
-        encoding: 'utf8',
-        shell: false 
-      });
 
-      if (result.status === 0 && result.stdout) {
-        const paths = result.stdout.trim().split(/\r?\n/);
-        if (paths.length > 0 && paths[0] && existsSync(paths[0])) {
-          return paths[0];
-        }
-      }
-    } else {
-      // Use absolute path to which on Unix-like systems
-      const whichPath = '/usr/bin/which';
-      if (!existsSync(whichPath)) {
-        GraphLogger.warn('SYSTEM', `System utility ${whichPath} not found, falling back to bare name`);
-        return name;
-      }
-      
-      const result = spawnSync(whichPath, [name], { 
-        encoding: 'utf8',
-        shell: false 
-      });
+  return isWindows ? resolveWindowsExecutable(name) : resolveUnixExecutable(name);
+}
 
-      if (result.status === 0 && result.stdout) {
-        const path = result.stdout.trim();
-        if (path && existsSync(path)) {
-          return path;
-        }
-      }
-    }
-  } catch (error) {
-    GraphLogger.error('SYSTEM', `Failed to resolve path for ${name}: ${error instanceof Error ? error.message : String(error)}`);
+function resolveWindowsExecutable(name: string): string {
+  const wherePath = String.raw`C:\Windows\System32\where.exe`;
+  if (!existsSync(wherePath)) {
+    GraphLogger.warn('SYSTEM', `System utility ${wherePath} not found, falling back to bare name`);
+    return name;
   }
 
-  // Fallback to the original name if resolution fails
-  return name;
+  return resolveFromCommand(wherePath, [name], name, (stdout) => {
+    const paths = stdout.trim().split(/\r?\n/);
+    const firstPath = paths[0];
+    return firstPath && existsSync(firstPath) ? firstPath : null;
+  });
+}
+
+function resolveUnixExecutable(name: string): string {
+  const whichPath = '/usr/bin/which';
+  if (!existsSync(whichPath)) {
+    GraphLogger.warn('SYSTEM', `System utility ${whichPath} not found, falling back to bare name`);
+    return name;
+  }
+
+  return resolveFromCommand(whichPath, [name], name, (stdout) => {
+    const resolvedPath = stdout.trim();
+    return resolvedPath && existsSync(resolvedPath) ? resolvedPath : null;
+  });
+}
+
+function resolveFromCommand(
+  command: string,
+  args: string[],
+  fallback: string,
+  parseStdout: (stdout: string) => string | null
+): string {
+  try {
+    const result = spawnSync(command, args, {
+      encoding: 'utf8',
+      shell: false,
+    });
+
+    if (result.status === 0 && result.stdout) {
+      return parseStdout(result.stdout) ?? fallback;
+    }
+  } catch (error) {
+    GraphLogger.error(
+      'SYSTEM',
+      `Failed to resolve path for ${fallback}: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+
+  return fallback;
 }

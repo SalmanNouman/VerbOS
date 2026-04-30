@@ -1,5 +1,5 @@
-import { spawn, ChildProcess } from 'child_process';
-import { join } from 'path';
+import { spawn, ChildProcess } from 'node:child_process';
+import { join } from 'node:path';
 import { app } from 'electron';
 import { GraphLogger } from './logger';
 import { resolveExecutablePath } from './utils';
@@ -148,9 +148,7 @@ export class PythonManager {
 let pythonManagerInstance: PythonManager | null = null;
 
 export function getPythonManager(): PythonManager {
-  if (!pythonManagerInstance) {
-    pythonManagerInstance = new PythonManager();
-  }
+  pythonManagerInstance ??= new PythonManager();
   return pythonManagerInstance;
 }
 

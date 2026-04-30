@@ -1,5 +1,5 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
-import { join } from 'path';
+import { join } from 'node:path';
 import { StorageService } from './storage';
 import { getPythonManager, setupPythonManagerLifecycle } from './PythonManager';
 import { getPythonAPIClient } from './PythonAPIClient';

@@ -1,5 +1,6 @@
 import { app } from 'electron';
-import { join } from 'path';
+import { existsSync, readFileSync, renameSync } from 'node:fs';
+import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { v4 as uuidv4 } from 'uuid';
 import type { Message, ChatSession, ChatSummary } from '../../src/types/verbos';
@@ -46,7 +47,6 @@ export class StorageService {
 
   private migrateFromJSON(): void {
     try {
-      const { existsSync, readFileSync, renameSync } = require('fs');
       const oldPath = join(app.getPath('userData'), 'verbos-history.json');
 
       if (existsSync(oldPath)) {
