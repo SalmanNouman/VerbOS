@@ -34,6 +34,8 @@ export type TraceStepStatus =
   | 'approved'
   | 'denied';
 
+type TraceSensitivity = 'safe' | 'moderate' | 'sensitive';
+
 export interface TraceStep {
   id: string;
   kind: TraceStepKind;
@@ -45,7 +47,7 @@ export interface TraceStep {
   toolArgs?: unknown;
   toolResult?: string;
   next?: string;
-  sensitivity?: 'safe' | 'moderate' | 'sensitive';
+  sensitivity?: TraceSensitivity;
   status?: TraceStepStatus;
 }
 
@@ -59,6 +61,11 @@ interface AgentTraceProps {
 
 const ROUTING_PATTERN = /^Routing to (.+?)\.\.\.$/;
 const NEXT_PATTERN = /^Next: (.+)$/;
+const SENSITIVITY_BADGE_CLASSES: Record<TraceSensitivity, string> = {
+  sensitive: 'bg-red-500/10 text-red-400',
+  moderate: 'bg-amber-500/10 text-amber-400',
+  safe: 'bg-emerald-500/10 text-emerald-400',
+};
 
 // Monotonic counter for generating unique trace-step ids. These ids are only
 // used as React keys and for targeted updates — no security or entropy
@@ -328,14 +335,8 @@ function statusBadge(status?: TraceStepStatus) {
 function sensitivityBadge(sensitivity?: TraceStep['sensitivity']) {
   if (!sensitivity) return null;
 
-  const classes = {
-    sensitive: 'bg-red-500/10 text-red-400',
-    moderate: 'bg-amber-500/10 text-amber-400',
-    safe: 'bg-emerald-500/10 text-emerald-400',
-  };
-
   return (
-    <span className={`text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded ${classes[sensitivity]}`}>
+    <span className={`text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded ${SENSITIVITY_BADGE_CLASSES[sensitivity]}`}>
       {sensitivity}
     </span>
   );
