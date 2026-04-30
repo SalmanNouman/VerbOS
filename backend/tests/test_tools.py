@@ -12,15 +12,92 @@ class TestPathValidation:
             validate_path("")
 
     def test_validate_path_blocked(self):
+        """On Unix, /etc is blocked. On Windows, C:\\Windows is blocked."""
         from tools.path_validation import validate_path
+        blocked_target = "C:\\Windows\\System32" if os.name == "nt" else "/etc"
         with pytest.raises(PermissionError, match="Security Violation"):
-            validate_path("C:\\Windows\\System32")
+            validate_path(blocked_target)
 
     def test_validate_path_home_allowed(self):
         from tools.path_validation import validate_path
         home = Path.home()
         result = validate_path(str(home))
         assert result == home.resolve()
+
+    def test_validate_path_rejects_sibling_prefix(self, tmp_path, monkeypatch):
+        """
+        Regression: prior implementation used `str.startswith` on resolved
+        paths, so `/tmp/pytest-.../sn-attacker/x.txt` passed when the allow-list
+        root was `/tmp/pytest-.../sn`. `Path.is_relative_to` must reject it.
+        """
+        import tools.path_validation as pv
+
+        allowed_root = tmp_path / "sn"
+        allowed_root.mkdir()
+        attacker_root = tmp_path / "sn-attacker"
+        attacker_root.mkdir()
+        target = attacker_root / "x.txt"
+        target.write_text("hello")
+
+        monkeypatch.setattr(pv, "SECURITY_CONFIG", {
+            "allowed_directories": [allowed_root],
+            "blocked_paths": [],
+        })
+
+        with pytest.raises(PermissionError, match="Security Violation"):
+            pv.validate_path(str(target))
+
+    def test_validate_path_accepts_descendant(self, tmp_path, monkeypatch):
+        import tools.path_validation as pv
+
+        allowed_root = tmp_path / "sn"
+        allowed_root.mkdir()
+        nested = allowed_root / "sub" / "dir"
+        nested.mkdir(parents=True)
+        target = nested / "ok.txt"
+        target.write_text("hello")
+
+        monkeypatch.setattr(pv, "SECURITY_CONFIG", {
+            "allowed_directories": [allowed_root],
+            "blocked_paths": [],
+        })
+
+        assert pv.validate_path(str(target)) == target.resolve()
+
+    def test_validate_write_path_rejects_sibling_prefix(self, tmp_path, monkeypatch):
+        """
+        The prefix-bypass also affected `validate_write_path`, which validated
+        only the parent directory, and the parent's prefix match could pass.
+        """
+        import tools.path_validation as pv
+
+        allowed_root = tmp_path / "sn"
+        allowed_root.mkdir()
+        attacker_root = tmp_path / "sn-attacker"
+        attacker_root.mkdir()
+        target = attacker_root / "new.txt"  # doesn't yet exist
+
+        monkeypatch.setattr(pv, "SECURITY_CONFIG", {
+            "allowed_directories": [allowed_root],
+            "blocked_paths": [],
+        })
+
+        with pytest.raises(PermissionError, match="Security Violation"):
+            pv.validate_write_path(str(target))
+
+    def test_validate_write_path_accepts_new_file_in_allowed(self, tmp_path, monkeypatch):
+        import tools.path_validation as pv
+
+        allowed_root = tmp_path / "sn"
+        allowed_root.mkdir()
+        target = allowed_root / "new.txt"  # doesn't yet exist
+
+        monkeypatch.setattr(pv, "SECURITY_CONFIG", {
+            "allowed_directories": [allowed_root],
+            "blocked_paths": [],
+        })
+
+        assert pv.validate_write_path(str(target)) == target.resolve()
 
 
 class TestFileTool:
