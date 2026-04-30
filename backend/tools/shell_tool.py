@@ -1,8 +1,8 @@
 import subprocess
 import platform
 import re
-from typing import Literal
 from langchain_core.tools import tool
+from agent.sensitivity import SensitivityLevel, classify_command
 from tools.path_validation import validate_directory_path
 
 SHELL_SECURITY_CONFIG = {
@@ -82,35 +82,15 @@ def validate_command(command: str) -> None:
             )
 
 
-def get_command_sensitivity(command: str) -> Literal["safe", "moderate", "sensitive"]:
-    """Determines the sensitivity level of a command for HITL purposes."""
-    trimmed_command = command.strip().lower()
-    command_base = trimmed_command.split()[0]
+def get_command_sensitivity(command: str) -> SensitivityLevel:
+    """
+    Determines the sensitivity level of a command for HITL purposes.
 
-    safe_commands = ["ls", "dir", "cat", "type", "echo", "pwd", "ps", "tasklist", "whoami", "ping"]
-    if command_base in safe_commands:
-        if ">" not in trimmed_command:
-            return "safe"
-
-    moderate_commands = ["git", "npm", "npx", "yarn", "pnpm", "pip", "curl", "wget"]
-    if command_base in moderate_commands:
-        if command_base == "git":
-            parts = trimmed_command.split()
-            if len(parts) > 1:
-                safe_git_subcommands = ["status", "log", "diff", "branch", "remote", "show", "ls-files", "ls-tree"]
-                if parts[1] in safe_git_subcommands:
-                    return "safe"
-        
-        if command_base == "npm":
-            parts = trimmed_command.split()
-            if len(parts) > 1:
-                safe_npm_subcommands = ["list", "ls", "view", "info", "search", "outdated", "audit"]
-                if parts[1] in safe_npm_subcommands:
-                    return "safe"
-        
-        return "sensitive"
-
-    return "sensitive"
+    Thin wrapper around `agent.sensitivity.classify_command`. New code should
+    import `classify_command` from `agent.sensitivity` directly; this alias
+    is kept for backwards compatibility.
+    """
+    return classify_command(command)
 
 
 @tool

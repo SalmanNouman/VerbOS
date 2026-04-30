@@ -5,7 +5,7 @@ from typing import AsyncGenerator
 from langgraph.graph import StateGraph, END, START
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from langchain_core.messages import HumanMessage, ToolMessage
+from langchain_core.messages import HumanMessage, ToolMessage, RemoveMessage
 from agent.state import (
     GraphState,
     NODE_NAMES,
@@ -21,6 +21,7 @@ from agent.workers import (
     ResearcherWorker,
     CodeWorker,
 )
+from agent.workers.base_worker import pending_placeholder_id
 
 logger = logging.getLogger(__name__)
 
@@ -252,7 +253,12 @@ class VerbOSGraph:
             yield GraphEvent("error", {"message": str(e)})
 
     async def approve_action(self, thread_id: str) -> None:
-        """Approve a pending action and resume the graph."""
+        """Approve a pending action and resume the graph.
+
+        Replaces the `[Awaiting user approval]` placeholder ToolMessage with
+        the real tool result so the message history stays coherent (no
+        duplicate tool_call_id, no stale placeholder content).
+        """
         await self._ensure_graph()
         config = {"configurable": {"thread_id": thread_id}}
         state = await self._graph.aget_state(config)
@@ -272,25 +278,41 @@ class VerbOSGraph:
 
         result_messages = await worker.execute_pending_action(pending_action)
 
+        placeholder = RemoveMessage(id=pending_placeholder_id(pending_action.id))
         await self._graph.aupdate_state(config, {
-            "messages": result_messages,
+            "messages": [placeholder, *result_messages],
             "pending_action": None,
             "awaiting_approval": False,
         })
 
     async def deny_action(self, thread_id: str, reason: str | None = None) -> None:
-        """Deny a pending action and resume the graph."""
+        """Deny a pending action and resume the graph.
+
+        Replaces the placeholder ToolMessage with a real ToolMessage carrying
+        the denial, so the AIMessage's tool_call receives a proper response
+        (a dangling tool_call with only a placeholder ToolMessage would
+        confuse the model on the next turn).
+        """
         await self._ensure_graph()
         config = {"configurable": {"thread_id": thread_id}}
         state = await self._graph.aget_state(config)
 
-        if not state.values.get("pending_action"):
+        pending_action = state.values.get("pending_action")
+        if not pending_action:
             raise ValueError("No pending action to deny")
 
-        deny_message = f"Action denied by user: {reason}" if reason else "Action denied by user"
+        if isinstance(pending_action, dict):
+            pending_action = PendingAction(**pending_action)
+
+        reason_suffix = f": {reason}" if reason else ""
+        denial = ToolMessage(
+            tool_call_id=pending_action.id,
+            content=f"User denied this action{reason_suffix}.",
+        )
+        placeholder = RemoveMessage(id=pending_placeholder_id(pending_action.id))
 
         await self._graph.aupdate_state(config, {
-            "messages": [HumanMessage(content=deny_message)],
+            "messages": [placeholder, denial],
             "pending_action": None,
             "awaiting_approval": False,
         })
