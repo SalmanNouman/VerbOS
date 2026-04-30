@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { Prism as SyntaxHighlighter, type SyntaxHighlighterProps } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import {
   Sparkles,
@@ -29,9 +29,12 @@ import {
   type TraceStep,
 } from './AgentTrace';
 
+type AgentState = 'thinking' | 'executing' | 'idle';
+type ToolEvent = Extract<AgentEvent, { type: 'tool' }>;
+
 interface ChatInterfaceProps {
-  currentSession: ChatSession | null;
-  onUpdateTitle: (sessionId: string, title: string) => Promise<void>;
+  readonly currentSession: ChatSession | null;
+  readonly onUpdateTitle: (sessionId: string, title: string) => Promise<void>;
 }
 
 interface ToolLog {
@@ -46,6 +49,40 @@ const MESSAGE_ROLE_CLASSES = {
   assistant: 'bg-surface-raised text-text-secondary border border-border/50 hover:border-brand-primary/20',
   error: 'bg-red-500/5 text-red-600 border border-red-500/20',
 };
+const SYNTAX_HIGHLIGHTER_STYLE: SyntaxHighlighterProps['style'] = vscDarkPlus;
+const ASSISTANT_NAME_BY_ROLE: Record<Message['role'], string> = {
+  user: 'You',
+  assistant: 'VerbOS',
+};
+const AGENT_STATE_COLORS: Record<Exclude<AgentState, 'idle'>, string> = {
+  thinking: 'brand-primary',
+  executing: 'brand-accent',
+};
+const MARKDOWN_COMPONENTS: Components = {
+  code({ className, children, ...props }) {
+    const match = /language-(\w+)/.exec(className ?? '');
+    if (match) {
+      return (
+        <SyntaxHighlighter
+          style={SYNTAX_HIGHLIGHTER_STYLE}
+          language={match[1]}
+          PreTag="div"
+          className="!bg-background/80 !rounded-lg !text-xs !my-3 overflow-hidden !border !border-border/30"
+          {...props}
+        >
+          {String(children).replace(/\n$/, '')}
+        </SyntaxHighlighter>
+      );
+    }
+
+    return (
+      <code className={`${className} bg-background/60 text-brand-primary px-1.5 py-0.5 rounded text-xs font-mono border border-border/20`} {...props}>
+        {children}
+      </code>
+    );
+  },
+};
+const verbosApi = () => globalThis.window.verbos;
 
 function isErrorMessage(content: string) {
   return content.includes('Error:') || content.includes('❌ Failed:') || content.includes('Agent logic reached session threshold');
@@ -78,6 +115,53 @@ function shortenLogResult(result: string): string {
   return result.length > 300 ? `${result.slice(0, 300)}...` : result;
 }
 
+function resetAgentState(
+  setIsLoading: React.Dispatch<React.SetStateAction<boolean>>,
+  setStatusMessage: React.Dispatch<React.SetStateAction<string | null>>,
+  setAgentState: React.Dispatch<React.SetStateAction<AgentState>>
+) {
+  setIsLoading(false);
+  setStatusMessage(null);
+  setAgentState('idle');
+}
+
+function addToolLogs(
+  tools: ToolEvent['tools'],
+  setToolLogs: React.Dispatch<React.SetStateAction<ToolLog[]>>
+) {
+  const newLogs = tools.map((tool, index) => ({
+    id: `${Date.now()}-${tool.name}-${index}`,
+    name: tool.name,
+    args: tool.args,
+  }));
+  setToolLogs(prev => [...prev, ...newLogs]);
+}
+
+function setOldestPendingToolResult(
+  result: string,
+  setToolLogs: React.Dispatch<React.SetStateAction<ToolLog[]>>
+) {
+  setToolLogs(prev => {
+    const pendingIndex = prev.findIndex(log => !log.result);
+    if (pendingIndex === -1) {
+      return prev;
+    }
+
+    const nextLogs = [...prev];
+    nextLogs[pendingIndex] = { ...nextLogs[pendingIndex], result };
+    return nextLogs;
+  });
+}
+
+function agentStateClasses(agentState: AgentState) {
+  const color = agentState === 'executing' ? AGENT_STATE_COLORS.executing : AGENT_STATE_COLORS.thinking;
+
+  return {
+    text: color === 'brand-primary' ? 'text-brand-primary' : 'text-brand-accent',
+    dot: color === 'brand-primary' ? 'bg-brand-primary/60' : 'bg-brand-accent/60',
+  };
+}
+
 export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfaceProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -87,7 +171,7 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const [toolLogs, setToolLogs] = useState<ToolLog[]>([]);
   const [showToolLogs, setShowToolLogs] = useState(false);
-  const [agentState, setAgentState] = useState<'thinking' | 'executing' | 'idle'>('idle');
+  const [agentState, setAgentState] = useState<AgentState>('idle');
   const [trace, setTrace] = useState<TraceStep[]>([]);
   const [showTrace, setShowTrace] = useState(true);
 
@@ -95,19 +179,18 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
   const inputRef = useRef<HTMLInputElement>(null);
 
   const resetLoadingState = () => {
-    setIsLoading(false);
-    setStatusMessage(null);
-    setAgentState('idle');
+    resetAgentState(setIsLoading, setStatusMessage, setAgentState);
   };
 
   const removeStreamListeners = () => {
-    globalThis.window.verbos?.removeAgentEventListener();
-    globalThis.window.verbos?.removeStreamEndListener();
+    verbosApi()?.removeAgentEventListener();
+    verbosApi()?.removeStreamEndListener();
   };
 
   const registerStreamListeners = () => {
-    globalThis.window.verbos?.onAgentEvent(handleAgentEvent);
-    globalThis.window.verbos?.onStreamEnd(() => {
+    const verbos = verbosApi();
+    verbos?.onAgentEvent(handleAgentEvent);
+    verbos?.onStreamEnd(() => {
       resetLoadingState();
       removeStreamListeners();
     });
@@ -132,28 +215,6 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
     setTrace([]);
   }, [currentSession?.id]);
 
-  const appendToolLogs = (tools: Array<{ name: string; args: unknown }>) => {
-    const newLogs = tools.map((tool, index) => ({
-      id: `${Date.now()}-${tool.name}-${index}`,
-      name: tool.name,
-      args: tool.args,
-    }));
-    setToolLogs(prev => [...prev, ...newLogs]);
-  };
-
-  const updateLastPendingToolResult = (result: string) => {
-    setToolLogs(prev => {
-      const pendingIndex = prev.findIndex(log => !log.result);
-      if (pendingIndex === -1) {
-        return prev;
-      }
-
-      const nextLogs = [...prev];
-      nextLogs[pendingIndex] = { ...nextLogs[pendingIndex], result };
-      return nextLogs;
-    });
-  };
-
   const handleAgentEvent = (event: AgentEvent) => {
     setTrace(prev => reduceTrace(prev, event));
 
@@ -166,11 +227,11 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
         setStatusMessage(event.message);
         setAgentState('executing');
         if (event.tools) {
-          appendToolLogs(event.tools);
+          addToolLogs(event.tools, setToolLogs);
         }
         break;
       case 'tool_result':
-        updateLastPendingToolResult(event.message);
+        setOldestPendingToolResult(event.message, setToolLogs);
         break;
       case 'response':
         setMessages(prev => appendOrReplaceAssistantMessage(prev, event.message));
@@ -207,9 +268,10 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
     setTrace(prev => startTurn(prev, text));
 
     try {
-      if (globalThis.window.verbos?.askAgent) {
+      const verbos = verbosApi();
+      if (verbos?.askAgent) {
         registerStreamListeners();
-        await globalThis.window.verbos.askAgent(currentSession.id, text);
+        await verbos.askAgent(currentSession.id, text);
       } else {
         setTimeout(async () => {
           setMessages(prev => [...prev, {
@@ -239,9 +301,10 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
     setTrace(prev => resolveLastApproval(prev, 'approved'));
 
     try {
-      await globalThis.window.verbos?.approveAction(currentSession.id);
+      const verbos = verbosApi();
+      await verbos?.approveAction(currentSession.id);
       registerStreamListeners();
-      await globalThis.window.verbos?.resumeAgent(currentSession.id);
+      await verbos?.resumeAgent(currentSession.id);
     } catch (error) {
       console.error('Approval error:', error);
       resetLoadingState();
@@ -258,9 +321,10 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
     setTrace(prev => resolveLastApproval(prev, 'denied'));
 
     try {
-      await globalThis.window.verbos?.denyAction(currentSession.id, 'User denied the action');
+      const verbos = verbosApi();
+      await verbos?.denyAction(currentSession.id, 'User denied the action');
       registerStreamListeners();
-      await globalThis.window.verbos?.resumeAgent(currentSession.id);
+      await verbos?.resumeAgent(currentSession.id);
     } catch (error) {
       console.error('Deny error:', error);
       resetLoadingState();
@@ -328,15 +392,18 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
           <div className="max-w-3xl mx-auto px-6 py-4 space-y-5">
             {messages.map((msg, index) => {
               const isError = isErrorMessage(msg.content);
+              const bubbleAlignment = msg.role === 'user' ? 'justify-end' : 'justify-start';
+              const messageAlignment = msg.role === 'user' ? 'items-end' : 'items-start';
+              const nameColor = msg.role === 'user' ? 'text-brand-secondary' : 'text-brand-primary';
               return (
                 <div
                   key={`${msg.role}-${index}-${msg.content.length}`}
-                  className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} group`}
+                  className={`flex ${bubbleAlignment} group`}
                 >
-                  <div className={`flex flex-col gap-1.5 max-w-[80%] ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                  <div className={`flex flex-col gap-1.5 max-w-[80%] ${messageAlignment}`}>
                     <div className="flex items-center gap-2 px-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <span className={`text-[10px] font-semibold uppercase tracking-wider ${msg.role === 'user' ? 'text-brand-secondary' : 'text-brand-primary'}`}>
-                        {msg.role === 'user' ? 'You' : 'VerbOS'}
+                      <span className={`text-[10px] font-semibold uppercase tracking-wider ${nameColor}`}>
+                        {ASSISTANT_NAME_BY_ROLE[msg.role]}
                       </span>
                     </div>
                     <div
@@ -352,26 +419,7 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
                         <div className="prose prose-invert prose-sm">
                           <ReactMarkdown
                             remarkPlugins={[remarkGfm]}
-                            components={{
-                              code({ node, inline, className, children, ...props }: any) {
-                                const match = /language-(\w+)/.exec(className || '');
-                                return !inline && match ? (
-                                  <SyntaxHighlighter
-                                    style={vscDarkPlus as any}
-                                    language={match[1]}
-                                    PreTag="div"
-                                    className="!bg-background/80 !rounded-lg !text-xs !my-3 overflow-hidden !border !border-border/30"
-                                    {...props}
-                                  >
-                                    {String(children).replace(/\n$/, '')}
-                                  </SyntaxHighlighter>
-                                ) : (
-                                  <code className={`${className} bg-background/60 text-brand-primary px-1.5 py-0.5 rounded text-xs font-mono border border-border/20`} {...props}>
-                                    {children}
-                                  </code>
-                                );
-                              },
-                            }}
+                            components={MARKDOWN_COMPONENTS}
                           >
                             {msg.content}
                           </ReactMarkdown>
@@ -399,17 +447,18 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
                       )}
                     </div>
                     <div className="flex-1">
-                      <div className={`text-[10px] font-semibold uppercase tracking-wider mb-1 ${agentState === 'thinking' ? 'text-brand-primary' : 'text-brand-accent'}`}>
+                      <div className={`text-[10px] font-semibold uppercase tracking-wider mb-1 ${agentStateClasses(agentState).text}`}>
                         {statusMessage || 'Processing'}
                       </div>
                       <div className="flex gap-1">
-                        <div className={`w-1.5 h-1.5 rounded-full animate-bounce ${agentState === 'thinking' ? 'bg-brand-primary/60' : 'bg-brand-accent/60'}`} style={{ animationDelay: '0ms' }} />
-                        <div className={`w-1.5 h-1.5 rounded-full animate-bounce ${agentState === 'thinking' ? 'bg-brand-primary/60' : 'bg-brand-accent/60'}`} style={{ animationDelay: '150ms' }} />
-                        <div className={`w-1.5 h-1.5 rounded-full animate-bounce ${agentState === 'thinking' ? 'bg-brand-primary/60' : 'bg-brand-accent/60'}`} style={{ animationDelay: '300ms' }} />
+                        <div className={`w-1.5 h-1.5 rounded-full animate-bounce ${agentStateClasses(agentState).dot}`} style={{ animationDelay: '0ms' }} />
+                        <div className={`w-1.5 h-1.5 rounded-full animate-bounce ${agentStateClasses(agentState).dot}`} style={{ animationDelay: '150ms' }} />
+                        <div className={`w-1.5 h-1.5 rounded-full animate-bounce ${agentStateClasses(agentState).dot}`} style={{ animationDelay: '300ms' }} />
                       </div>
                     </div>
                     {toolLogs.length > 0 && (
                       <button
+                        type="button"
                         onClick={() => setShowToolLogs(!showToolLogs)}
                         className="flex items-center gap-1 text-[10px] text-text-muted hover:text-text-primary px-2 py-1 rounded-md hover:bg-surface-overlay transition-colors"
                       >
@@ -485,6 +534,7 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
 
                   <div className="flex gap-3">
                     <button
+                      type="button"
                       onClick={handleApprove}
                       className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-green-500/10 hover:bg-green-500/20 border border-green-500/30 rounded-xl text-sm font-medium text-green-500 transition-all active:scale-95"
                     >
@@ -492,6 +542,7 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
                       Approve
                     </button>
                     <button
+                      type="button"
                       onClick={handleDeny}
                       className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 rounded-xl text-sm font-medium text-red-500 transition-all active:scale-95"
                     >
@@ -507,6 +558,7 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
             {!isLoading && messages.length > 0 && isErrorMessage(messages[messages.length - 1].content) && (
               <div className="flex justify-center mt-4 animate-in fade-in slide-in-from-bottom-2">
                 <button
+                  type="button"
                   onClick={handleRetry}
                   className="flex items-center gap-2 px-4 py-2 bg-surface-raised hover:bg-surface-overlay border border-border rounded-xl text-xs font-medium text-text-secondary transition-all shadow-sm hover:shadow-md active:scale-95"
                 >
@@ -551,11 +603,11 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
           <div className="flex justify-center gap-4 mt-2 text-[10px] text-text-dim">
             <span className="flex items-center gap-1.5">
               <kbd className="px-1.5 py-0.5 rounded border border-border bg-surface-raised text-[9px]">Enter</kbd>
-              Send
+              <span>Send</span>
             </span>
             <span className="flex items-center gap-1.5">
               <kbd className="px-1.5 py-0.5 rounded border border-border bg-surface-raised text-[9px]">Cmd</kbd>
-              Commands
+              <span>Commands</span>
             </span>
           </div>
         </div>
