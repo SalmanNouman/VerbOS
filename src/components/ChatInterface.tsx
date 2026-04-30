@@ -143,7 +143,7 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
 
   const updateLastPendingToolResult = (result: string) => {
     setToolLogs(prev => {
-      const pendingIndex = prev.findLastIndex(log => !log.result);
+      const pendingIndex = prev.findIndex(log => !log.result);
       if (pendingIndex === -1) {
         return prev;
       }
