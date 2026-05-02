@@ -123,6 +123,7 @@ class TestPathValidation:
         with pytest.raises(PermissionError, match="Security Violation"):
             pv.validate_path(str(target))
 
+    @pytest.mark.skipif(os.name == 'nt', reason="Symlink creation requires administrator privileges on Windows")
     def test_validate_path_rejects_symlink_escape(self, tmp_path, monkeypatch):
         import tools.path_validation as pv
 

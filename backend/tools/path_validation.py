@@ -84,16 +84,22 @@ def _reject_escape_components(path: Path) -> None:
 def _resolve_requested_path(requested_path: str) -> Path:
     decoded_path = _decode_requested_path(requested_path)
 
-    if _has_windows_anchor(decoded_path):
-        raise PermissionError("Security Violation: Windows absolute paths are not permitted.")
-
     path = Path(decoded_path)
     _reject_escape_components(path)
 
     if not path.is_absolute():
         path = Path.home() / path
 
-    return path.resolve()
+    resolved_path = path.resolve()
+
+    # Reject Windows absolute/UNC paths only if they're not in allowed directories
+    if _has_windows_anchor(str(resolved_path)):
+        for allowed_dir in _resolved_allowed_directories():
+            if _is_within(resolved_path, allowed_dir):
+                return resolved_path
+        raise PermissionError("Security Violation: Windows absolute paths are not permitted.")
+
+    return resolved_path
 
 
 def _ensure_allowed_path(real_path: Path) -> Path:
@@ -145,7 +151,7 @@ def validate_write_path(path: str) -> Path:
     Validates a path for file writing operations.
 
     For existing targets, checks existence and enforces both the block-list
-    and the allow-list directly without re-decoding. For new targets, validates
+    and the allow-list directly. For new targets, validates
     the parent directory (which enforces allow-list transitively) and then
     re-checks the resolved path against both lists so the allow-list is never skipped.
     """
