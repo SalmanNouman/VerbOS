@@ -142,7 +142,7 @@ function setOldestPendingToolResult(
   setToolLogs: React.Dispatch<React.SetStateAction<ToolLog[]>>
 ) {
   setToolLogs(prev => {
-    const pendingIndex = prev.findIndex(log => !log.result);
+    const pendingIndex = prev.findIndex(log => log.result === undefined);
     if (pendingIndex === -1) {
       return prev;
     }
@@ -195,6 +195,14 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
       removeStreamListeners();
     });
   };
+
+  // Clean up stream listeners when session changes
+  useEffect(() => {
+    return () => {
+      verbosApi()?.removeAgentEventListener();
+      verbosApi()?.removeStreamEndListener();
+    };
+  }, [currentSession?.id]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -362,257 +370,257 @@ export function ChatInterface({ currentSession, onUpdateTitle }: ChatInterfacePr
 
   return (
     <div className="flex h-full bg-background relative min-h-0">
-    <div className="flex flex-col h-full bg-background relative flex-1 min-w-0">
-      {/* Messages Area - Scrollable Container */}
-      <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
-        {messages.length === 0 ? (
-          <div className="h-full flex flex-col items-center justify-center px-6 py-8">
-            <div className="w-16 h-16 rounded-2xl bg-brand-primary/10 flex items-center justify-center text-brand-primary mb-6 border border-brand-primary/20 shadow-lg shadow-brand-primary/10">
-              <Sparkles size={32} strokeWidth={1.5} />
-            </div>
-            <h1 className="text-2xl font-display font-bold text-text-primary mb-2 text-center tracking-tight">How can I assist you today?</h1>
-            <p className="text-text-secondary text-sm max-w-md text-center leading-relaxed mb-8">
-              I am VerbOS, your agentic interface. I can help automate your workflow, manage system tasks, or just chat.
-            </p>
+      <div className="flex flex-col h-full bg-background relative flex-1 min-w-0">
+        {/* Messages Area - Scrollable Container */}
+        <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+          {messages.length === 0 ? (
+            <div className="h-full flex flex-col items-center justify-center px-6 py-8">
+              <div className="w-16 h-16 rounded-2xl bg-brand-primary/10 flex items-center justify-center text-brand-primary mb-6 border border-brand-primary/20 shadow-lg shadow-brand-primary/10">
+                <Sparkles size={32} strokeWidth={1.5} />
+              </div>
+              <h1 className="text-2xl font-display font-bold text-text-primary mb-2 text-center tracking-tight">How can I assist you today?</h1>
+              <p className="text-text-secondary text-sm max-w-md text-center leading-relaxed mb-8">
+                I am VerbOS, your agentic interface. I can help automate your workflow, manage system tasks, or just chat.
+              </p>
 
-            <div className="grid grid-cols-2 gap-3 w-full max-w-md">
-              <div className="p-3 rounded-xl bg-surface-raised/50 border border-border/50 hover:border-brand-primary/30 hover:bg-surface-raised cursor-pointer transition-all group">
-                <Terminal size={16} className="text-brand-primary mb-2 group-hover:scale-110 transition-transform" />
-                <p className="text-xs font-bold text-text-primary mb-0.5">Modern Shell</p>
-                <p className="text-[10px] text-text-muted">Run system commands safely</p>
-              </div>
-              <div className="p-3 rounded-xl bg-surface-raised/50 border border-border/50 hover:border-brand-accent/30 hover:bg-surface-raised cursor-pointer transition-all group">
-                <Cpu size={16} className="text-brand-accent mb-2 group-hover:scale-110 transition-transform" />
-                <p className="text-xs font-bold text-text-primary mb-0.5">Agentic Logic</p>
-                <p className="text-[10px] text-text-muted">Multi-step task automation</p>
+              <div className="grid grid-cols-2 gap-3 w-full max-w-md">
+                <div className="p-3 rounded-xl bg-surface-raised/50 border border-border/50 hover:border-brand-primary/30 hover:bg-surface-raised cursor-pointer transition-all group">
+                  <Terminal size={16} className="text-brand-primary mb-2 group-hover:scale-110 transition-transform" />
+                  <p className="text-xs font-bold text-text-primary mb-0.5">Modern Shell</p>
+                  <p className="text-[10px] text-text-muted">Run system commands safely</p>
+                </div>
+                <div className="p-3 rounded-xl bg-surface-raised/50 border border-border/50 hover:border-brand-accent/30 hover:bg-surface-raised cursor-pointer transition-all group">
+                  <Cpu size={16} className="text-brand-accent mb-2 group-hover:scale-110 transition-transform" />
+                  <p className="text-xs font-bold text-text-primary mb-0.5">Agentic Logic</p>
+                  <p className="text-[10px] text-text-muted">Multi-step task automation</p>
+                </div>
               </div>
             </div>
-          </div>
-        ) : (
-          <div className="max-w-3xl mx-auto px-6 py-4 space-y-5">
-            {messages.map((msg, index) => {
-              const isError = isErrorMessage(msg.content);
-              const bubbleAlignment = msg.role === 'user' ? 'justify-end' : 'justify-start';
-              const messageAlignment = msg.role === 'user' ? 'items-end' : 'items-start';
-              const nameColor = msg.role === 'user' ? 'text-brand-secondary' : 'text-brand-primary';
-              return (
-                <div
-                  key={`${msg.role}-${index}`}
-                  className={`flex ${bubbleAlignment} group`}
-                >
-                  <div className={`flex flex-col gap-1.5 max-w-[80%] ${messageAlignment}`}>
-                    <div className="flex items-center gap-2 px-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <span className={`text-[10px] font-semibold uppercase tracking-wider ${nameColor}`}>
-                        {ASSISTANT_NAME_BY_ROLE[msg.role]}
-                      </span>
-                    </div>
-                    <div
-                      className={`rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-md transition-all hover:shadow-lg ${messageBubbleClassName(msg)}`}
-                    >
-                      {isError && msg.role === 'assistant' && (
-                        <div className="flex items-center gap-2 mb-2 text-red-500 font-semibold text-xs uppercase tracking-wide">
-                          <AlertCircle size={14} />
-                          <span>Action Failed</span>
-                        </div>
-                      )}
-                      {msg.role === 'assistant' ? (
-                        <div className="prose prose-invert prose-sm">
-                          <ReactMarkdown
-                            remarkPlugins={[remarkGfm]}
-                            components={MARKDOWN_COMPONENTS}
-                          >
-                            {msg.content}
-                          </ReactMarkdown>
-                        </div>
-                      ) : (
-                        <p className="whitespace-pre-wrap">{msg.content}</p>
-                      )}
+          ) : (
+            <div className="max-w-3xl mx-auto px-6 py-4 space-y-5">
+              {messages.map((msg, index) => {
+                const isError = isErrorMessage(msg.content);
+                const bubbleAlignment = msg.role === 'user' ? 'justify-end' : 'justify-start';
+                const messageAlignment = msg.role === 'user' ? 'items-end' : 'items-start';
+                const nameColor = msg.role === 'user' ? 'text-brand-secondary' : 'text-brand-primary';
+                return (
+                  <div
+                    key={`${msg.role}-${index}`}
+                    className={`flex ${bubbleAlignment} group`}
+                  >
+                    <div className={`flex flex-col gap-1.5 max-w-[80%] ${messageAlignment}`}>
+                      <div className="flex items-center gap-2 px-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <span className={`text-[10px] font-semibold uppercase tracking-wider ${nameColor}`}>
+                          {ASSISTANT_NAME_BY_ROLE[msg.role]}
+                        </span>
+                      </div>
+                      <div
+                        className={`rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-md transition-all hover:shadow-lg ${messageBubbleClassName(msg)}`}
+                      >
+                        {isError && msg.role === 'assistant' && (
+                          <div className="flex items-center gap-2 mb-2 text-red-500 font-semibold text-xs uppercase tracking-wide">
+                            <AlertCircle size={14} />
+                            <span>Action Failed</span>
+                          </div>
+                        )}
+                        {msg.role === 'assistant' ? (
+                          <div className="prose prose-invert prose-sm">
+                            <ReactMarkdown
+                              remarkPlugins={[remarkGfm]}
+                              components={MARKDOWN_COMPONENTS}
+                            >
+                              {msg.content}
+                            </ReactMarkdown>
+                          </div>
+                        ) : (
+                          <p className="whitespace-pre-wrap">{msg.content}</p>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
 
-            {/* Loading/Status/Reasoning Indicator */}
-            {isLoading && (
-              <div className="flex justify-start">
-                <div className="bg-surface-raised border border-border/50 px-4 py-3 rounded-2xl shadow-md w-full max-w-xl">
-                  {/* Status Header */}
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-brand-primary/10 flex items-center justify-center">
-                      {agentState === 'thinking' ? (
-                        <Brain size={16} className="text-brand-primary animate-pulse" />
-                      ) : (
-                        <Terminal size={16} className="text-brand-accent animate-pulse" />
+              {/* Loading/Status/Reasoning Indicator */}
+              {isLoading && (
+                <div className="flex justify-start">
+                  <div className="bg-surface-raised border border-border/50 px-4 py-3 rounded-2xl shadow-md w-full max-w-xl">
+                    {/* Status Header */}
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-brand-primary/10 flex items-center justify-center">
+                        {agentState === 'thinking' ? (
+                          <Brain size={16} className="text-brand-primary animate-pulse" />
+                        ) : (
+                          <Terminal size={16} className="text-brand-accent animate-pulse" />
+                        )}
+                      </div>
+                      <div className="flex-1">
+                        <div className={`text-[10px] font-semibold uppercase tracking-wider mb-1 ${agentStateClasses(agentState).text}`}>
+                          {statusMessage || 'Processing'}
+                        </div>
+                        <div className="flex gap-1">
+                          <div className={`w-1.5 h-1.5 rounded-full animate-bounce ${agentStateClasses(agentState).dot}`} style={{ animationDelay: '0ms' }} />
+                          <div className={`w-1.5 h-1.5 rounded-full animate-bounce ${agentStateClasses(agentState).dot}`} style={{ animationDelay: '150ms' }} />
+                          <div className={`w-1.5 h-1.5 rounded-full animate-bounce ${agentStateClasses(agentState).dot}`} style={{ animationDelay: '300ms' }} />
+                        </div>
+                      </div>
+                      {toolLogs.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setShowToolLogs(!showToolLogs)}
+                          className="flex items-center gap-1 text-[10px] text-text-muted hover:text-text-primary px-2 py-1 rounded-md hover:bg-surface-overlay transition-colors"
+                        >
+                          {showToolLogs ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                          {showToolLogs ? 'Hide Reasoning' : 'View Reasoning'}
+                        </button>
                       )}
                     </div>
-                    <div className="flex-1">
-                      <div className={`text-[10px] font-semibold uppercase tracking-wider mb-1 ${agentStateClasses(agentState).text}`}>
-                        {statusMessage || 'Processing'}
+
+                    {/* Collapsible Tool Logs */}
+                    {showToolLogs && toolLogs.length > 0 && (
+                      <div className="mt-3 pt-3 border-t border-border/30 space-y-3 animate-in fade-in slide-in-from-top-1">
+                        {toolLogs.map((log) => (
+                          <div key={log.id} className="text-xs">
+                            <div className="flex items-center gap-2 text-text-dim mb-1 font-mono">
+                              <ChevronRight size={10} />
+                              <span className="font-semibold text-brand-secondary">{log.name}</span>
+                            </div>
+                            <div className="pl-4 border-l-2 border-border/30 ml-1 space-y-1">
+                              <pre className="bg-background/50 p-2 rounded text-[10px] text-text-secondary overflow-x-auto">
+                                {JSON.stringify(log.args, null, 2)}
+                              </pre>
+                              {log.result !== undefined && (
+                                <div className="mt-1">
+                                  <div className="text-[10px] text-green-500/80 mb-0.5">Result:</div>
+                                  <pre className="bg-background/50 p-2 rounded text-[10px] text-text-secondary overflow-x-auto max-h-32">
+                                    {shortenLogResult(log.result) || 'No output'}
+                                  </pre>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
                       </div>
-                      <div className="flex gap-1">
-                        <div className={`w-1.5 h-1.5 rounded-full animate-bounce ${agentStateClasses(agentState).dot}`} style={{ animationDelay: '0ms' }} />
-                        <div className={`w-1.5 h-1.5 rounded-full animate-bounce ${agentStateClasses(agentState).dot}`} style={{ animationDelay: '150ms' }} />
-                        <div className={`w-1.5 h-1.5 rounded-full animate-bounce ${agentStateClasses(agentState).dot}`} style={{ animationDelay: '300ms' }} />
-                      </div>
-                    </div>
-                    {toolLogs.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => setShowToolLogs(!showToolLogs)}
-                        className="flex items-center gap-1 text-[10px] text-text-muted hover:text-text-primary px-2 py-1 rounded-md hover:bg-surface-overlay transition-colors"
-                      >
-                        {showToolLogs ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                        {showToolLogs ? 'Hide Reasoning' : 'View Reasoning'}
-                      </button>
                     )}
                   </div>
-
-                  {/* Collapsible Tool Logs */}
-                  {showToolLogs && toolLogs.length > 0 && (
-                    <div className="mt-3 pt-3 border-t border-border/30 space-y-3 animate-in fade-in slide-in-from-top-1">
-                      {toolLogs.map((log) => (
-                        <div key={log.id} className="text-xs">
-                          <div className="flex items-center gap-2 text-text-dim mb-1 font-mono">
-                            <ChevronRight size={10} />
-                            <span className="font-semibold text-brand-secondary">{log.name}</span>
-                          </div>
-                          <div className="pl-4 border-l-2 border-border/30 ml-1 space-y-1">
-                            <pre className="bg-background/50 p-2 rounded text-[10px] text-text-secondary overflow-x-auto">
-                              {JSON.stringify(log.args, null, 2)}
-                            </pre>
-                            {log.result && (
-                              <div className="mt-1">
-                                <div className="text-[10px] text-green-500/80 mb-0.5">Result:</div>
-                                <pre className="bg-background/50 p-2 rounded text-[10px] text-text-secondary overflow-x-auto max-h-32">
-                                  {shortenLogResult(log.result)}
-                                </pre>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
                 </div>
-              </div>
-            )}
+              )}
 
-            {/* HITL Approval Card */}
-            {pendingAction && !isLoading && (
-              <div className="flex justify-start animate-in fade-in slide-in-from-bottom-2">
-                <div className="bg-amber-500/5 border border-amber-500/30 px-5 py-4 rounded-2xl shadow-lg max-w-md w-full">
-                  <div className="flex items-start gap-3 mb-4">
-                    <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center flex-shrink-0">
-                      <AlertTriangle size={20} className="text-amber-500" />
-                    </div>
-                    <div>
-                      <div className="text-xs font-semibold text-amber-500 uppercase tracking-wider mb-1">
-                        Approval Required
+              {/* HITL Approval Card */}
+              {pendingAction && !isLoading && (
+                <div className="flex justify-start animate-in fade-in slide-in-from-bottom-2">
+                  <div className="bg-amber-500/5 border border-amber-500/30 px-5 py-4 rounded-2xl shadow-lg max-w-md w-full">
+                    <div className="flex items-start gap-3 mb-4">
+                      <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center flex-shrink-0">
+                        <AlertTriangle size={20} className="text-amber-500" />
                       </div>
-                      <p className="text-sm text-text-primary font-medium">
-                        {pendingAction.description}
-                      </p>
+                      <div>
+                        <div className="text-xs font-semibold text-amber-500 uppercase tracking-wider mb-1">
+                          Approval Required
+                        </div>
+                        <p className="text-sm text-text-primary font-medium">
+                          {pendingAction.description}
+                        </p>
+                      </div>
                     </div>
-                  </div>
 
-                  <div className="bg-background/50 rounded-lg p-3 mb-4 border border-border/30">
-                    <div className="flex items-center gap-2 text-xs text-text-muted mb-2">
-                      <Wrench size={12} />
-                      <span className="font-medium">{pendingAction.toolName}</span>
-                      <span className="text-text-dim">by {pendingAction.workerName.replace('_worker', '')}</span>
+                    <div className="bg-background/50 rounded-lg p-3 mb-4 border border-border/30">
+                      <div className="flex items-center gap-2 text-xs text-text-muted mb-2">
+                        <Wrench size={12} />
+                        <span className="font-medium">{pendingAction.toolName}</span>
+                        <span className="text-text-dim">by {pendingAction.workerName.replace('_worker', '')}</span>
+                      </div>
+                      <div className="relative group">
+                        <pre
+                          className="text-xs text-text-secondary overflow-x-auto whitespace-pre-wrap break-all max-h-32 overflow-y-auto custom-scrollbar"
+                          title={JSON.stringify(pendingAction.toolArgs, null, 2)}
+                        >
+                          {JSON.stringify(pendingAction.toolArgs, null, 2)}
+                        </pre>
+                      </div>
                     </div>
-                    <div className="relative group">
-                      <pre
-                        className="text-xs text-text-secondary overflow-x-auto whitespace-pre-wrap break-all max-h-32 overflow-y-auto custom-scrollbar"
-                        title={JSON.stringify(pendingAction.toolArgs, null, 2)}
+
+                    <div className="flex gap-3">
+                      <button
+                        type="button"
+                        onClick={handleApprove}
+                        className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-green-500/10 hover:bg-green-500/20 border border-green-500/30 rounded-xl text-sm font-medium text-green-500 transition-all active:scale-95"
                       >
-                        {JSON.stringify(pendingAction.toolArgs, null, 2)}
-                      </pre>
+                        <CheckCircle size={16} />
+                        Approve
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleDeny}
+                        className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 rounded-xl text-sm font-medium text-red-500 transition-all active:scale-95"
+                      >
+                        <XCircle size={16} />
+                        Deny
+                      </button>
                     </div>
-                  </div>
-
-                  <div className="flex gap-3">
-                    <button
-                      type="button"
-                      onClick={handleApprove}
-                      className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-green-500/10 hover:bg-green-500/20 border border-green-500/30 rounded-xl text-sm font-medium text-green-500 transition-all active:scale-95"
-                    >
-                      <CheckCircle size={16} />
-                      Approve
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleDeny}
-                      className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 rounded-xl text-sm font-medium text-red-500 transition-all active:scale-95"
-                    >
-                      <XCircle size={16} />
-                      Deny
-                    </button>
                   </div>
                 </div>
-              </div>
-            )}
+              )}
 
-            {/* Retry Button */}
-            {!isLoading && messages.length > 0 && isErrorMessage(messages[messages.length - 1].content) && (
-              <div className="flex justify-center mt-4 animate-in fade-in slide-in-from-bottom-2">
+              {/* Retry Button */}
+              {!isLoading && messages.length > 0 && isErrorMessage(messages[messages.length - 1].content) && (
+                <div className="flex justify-center mt-4 animate-in fade-in slide-in-from-bottom-2">
+                  <button
+                    type="button"
+                    onClick={handleRetry}
+                    className="flex items-center gap-2 px-4 py-2 bg-surface-raised hover:bg-surface-overlay border border-border rounded-xl text-xs font-medium text-text-secondary transition-all shadow-sm hover:shadow-md active:scale-95"
+                  >
+                    <RefreshCw size={14} />
+                    <span>Retry Last Request</span>
+                  </button>
+                </div>
+              )}
+
+              <div ref={messagesEndRef} />
+            </div>
+          )}
+        </div>
+
+        {/* Input Area */}
+        <div className="px-6 py-3 border-t border-border/30 bg-background flex-shrink-0">
+          <div className="max-w-3xl mx-auto">
+            <form onSubmit={handleSubmit}>
+              <div className="flex items-center gap-3 bg-surface-overlay border border-border/60 rounded-2xl px-4 py-2 focus-within:border-brand-primary/50 transition-colors">
+                <Command size={18} className="text-text-muted flex-shrink-0" />
+                <input
+                  ref={inputRef}
+                  type="text"
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  placeholder="Message VerbOS..."
+                  className="flex-1 bg-transparent text-text-primary py-2 focus:outline-none text-sm placeholder:text-text-muted/50"
+                  autoFocus
+                />
                 <button
-                  type="button"
-                  onClick={handleRetry}
-                  className="flex items-center gap-2 px-4 py-2 bg-surface-raised hover:bg-surface-overlay border border-border rounded-xl text-xs font-medium text-text-secondary transition-all shadow-sm hover:shadow-md active:scale-95"
+                  type="submit"
+                  disabled={isLoading || !input.trim()}
+                  className={`p-2 rounded-xl transition-all ${input.trim() && !isLoading
+                    ? 'bg-brand-primary text-background hover:bg-brand-primary-hover'
+                    : 'bg-surface-raised text-text-muted opacity-50'
+                    }`}
                 >
-                  <RefreshCw size={14} />
-                  <span>Retry Last Request</span>
+                  {isLoading ? <Loader2 size={16} className="animate-spin" /> : <ArrowUp size={16} strokeWidth={2.5} />}
                 </button>
               </div>
-            )}
-
-            <div ref={messagesEndRef} />
-          </div>
-        )}
-      </div>
-
-      {/* Input Area */}
-      <div className="px-6 py-3 border-t border-border/30 bg-background flex-shrink-0">
-        <div className="max-w-3xl mx-auto">
-          <form onSubmit={handleSubmit}>
-            <div className="flex items-center gap-3 bg-surface-overlay border border-border/60 rounded-2xl px-4 py-2 focus-within:border-brand-primary/50 transition-colors">
-              <Command size={18} className="text-text-muted flex-shrink-0" />
-              <input
-                ref={inputRef}
-                type="text"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder="Message VerbOS..."
-                className="flex-1 bg-transparent text-text-primary py-2 focus:outline-none text-sm placeholder:text-text-muted/50"
-                autoFocus
-              />
-              <button
-                type="submit"
-                disabled={isLoading || !input.trim()}
-                className={`p-2 rounded-xl transition-all ${input.trim() && !isLoading
-                  ? 'bg-brand-primary text-background hover:bg-brand-primary-hover'
-                  : 'bg-surface-raised text-text-muted opacity-50'
-                  }`}
-              >
-                {isLoading ? <Loader2 size={16} className="animate-spin" /> : <ArrowUp size={16} strokeWidth={2.5} />}
-              </button>
+            </form>
+            <div className="flex justify-center gap-4 mt-2 text-[10px] text-text-dim">
+              <span className="flex items-center gap-1.5">
+                <kbd className="px-1.5 py-0.5 rounded border border-border bg-surface-raised text-[9px]">Enter</kbd>
+                <span>Send</span>
+              </span>
+              <span className="flex items-center gap-1.5">
+                <kbd className="px-1.5 py-0.5 rounded border border-border bg-surface-raised text-[9px]">Cmd</kbd>
+                <span>Commands</span>
+              </span>
             </div>
-          </form>
-          <div className="flex justify-center gap-4 mt-2 text-[10px] text-text-dim">
-            <span className="flex items-center gap-1.5">
-              <kbd className="px-1.5 py-0.5 rounded border border-border bg-surface-raised text-[9px]">Enter</kbd>
-              <span>Send</span>
-            </span>
-            <span className="flex items-center gap-1.5">
-              <kbd className="px-1.5 py-0.5 rounded border border-border bg-surface-raised text-[9px]">Cmd</kbd>
-              <span>Commands</span>
-            </span>
           </div>
         </div>
       </div>
-    </div>
 
       <AgentTrace
         trace={trace}
