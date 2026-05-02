@@ -1,5 +1,8 @@
-"""Tests for the single-source-of-truth sensitivity classifier."""
 import pytest
+
+from agent.sensitivity import classify_command, classify_tool
+from agent.workers.base_worker import get_tool_sensitivity, pending_placeholder_id
+from tools.shell_tool import get_command_sensitivity
 
 
 class TestClassifyCommand:
@@ -13,7 +16,6 @@ class TestClassifyCommand:
         "whoami",
     ])
     def test_read_only_commands_are_safe(self, command):
-        from agent.sensitivity import classify_command
         assert classify_command(command) == "safe"
 
     @pytest.mark.parametrize("command", [
@@ -26,7 +28,6 @@ class TestClassifyCommand:
         "yarn info react",
     ])
     def test_read_only_subcommands_are_safe(self, command):
-        from agent.sensitivity import classify_command
         assert classify_command(command) == "safe"
 
     @pytest.mark.parametrize("command", [
@@ -34,22 +35,9 @@ class TestClassifyCommand:
         "wget https://example.com/file",
     ])
     def test_network_fetch_commands_are_moderate(self, command):
-        """
-        Regression: previously these were sensitive. The three-tier system
-        collapsed to binary because nothing ever returned 'moderate'. Now
-        network-fetch commands are surfaced as moderate so the UI can treat
-        them differently from destructive mutations.
-        """
-        from agent.sensitivity import classify_command
         assert classify_command(command) == "moderate"
 
     def test_output_redirection_is_sensitive(self):
-        """
-        Regression: previously safe-base + `>` was downgraded to "moderate",
-        which bypassed HITL for `echo pwned > /etc/important_file`. Any
-        redirection must require approval since it writes to disk.
-        """
-        from agent.sensitivity import classify_command
         assert classify_command("echo hello") == "safe"
         assert classify_command("echo hello > /tmp/x") == "sensitive"
         assert classify_command("echo hello >> /tmp/x") == "sensitive"
@@ -64,12 +52,6 @@ class TestClassifyCommand:
         "cat < /tmp/evil",
     ])
     def test_unsafe_shell_operators_force_sensitive(self, command):
-        """
-        Regression: shell metacharacters (pipe, semicolon, command
-        substitution, etc.) must escalate even a safe-base command to
-        "sensitive" so the escape hatch can't be used to smuggle mutations.
-        """
-        from agent.sensitivity import classify_command
         assert classify_command(command) == "sensitive"
 
     @pytest.mark.parametrize("command", [
@@ -78,12 +60,6 @@ class TestClassifyCommand:
         "git config user.email attacker@example.com",
     ])
     def test_git_config_is_sensitive(self, command):
-        """
-        Regression: `git config` was previously in the safe subcommand list,
-        but it can write arbitrary config values (including hook paths that
-        redirect execution or malicious aliases). It must always be sensitive.
-        """
-        from agent.sensitivity import classify_command
         assert classify_command(command) == "sensitive"
 
     @pytest.mark.parametrize("command", [
@@ -96,16 +72,13 @@ class TestClassifyCommand:
         "npx create-react-app foo",
     ])
     def test_mutating_package_and_vcs_commands_are_sensitive(self, command):
-        from agent.sensitivity import classify_command
         assert classify_command(command) == "sensitive"
 
     @pytest.mark.parametrize("command", ["", None, "   "])
     def test_invalid_commands_are_sensitive_by_default(self, command):
-        from agent.sensitivity import classify_command
         assert classify_command(command) == "sensitive"
 
     def test_unknown_command_is_sensitive_by_default(self):
-        from agent.sensitivity import classify_command
         assert classify_command("unknown-binary --do-stuff") == "sensitive"
 
 
@@ -123,7 +96,6 @@ class TestClassifyTool:
         "analyze_code_context",
     ])
     def test_read_only_and_analysis_tools_are_safe(self, tool_name):
-        from agent.sensitivity import classify_tool
         assert classify_tool(tool_name, {}) == "safe"
 
     @pytest.mark.parametrize("tool_name", [
@@ -132,48 +104,36 @@ class TestClassifyTool:
         "delete_file",
     ])
     def test_mutating_tools_are_sensitive(self, tool_name):
-        from agent.sensitivity import classify_tool
         assert classify_tool(tool_name, {}) == "sensitive"
 
     def test_unknown_tool_is_sensitive_by_default(self):
-        from agent.sensitivity import classify_tool
         assert classify_tool("some_new_tool", {}) == "sensitive"
 
     def test_shell_tool_delegates_to_command_classifier(self):
-        from agent.sensitivity import classify_tool
         assert classify_tool("execute_shell_command", {"command": "ls"}) == "safe"
         assert classify_tool("execute_shell_command", {"command": "curl https://x"}) == "moderate"
         assert classify_tool("execute_shell_command", {"command": "npm install"}) == "sensitive"
         assert classify_tool("execute_shell_command", {"command": "echo x > /tmp/y"}) == "sensitive"
 
     def test_shell_tool_with_missing_args_is_sensitive(self):
-        from agent.sensitivity import classify_tool
         assert classify_tool("execute_shell_command", None) == "sensitive"
         assert classify_tool("execute_shell_command", {}) == "sensitive"
         assert classify_tool("execute_shell_command", {"command": ""}) == "sensitive"
 
 
 class TestBackwardsCompatWrappers:
-    """The old import paths still work so nothing else has to change."""
-
     def test_get_command_sensitivity_from_shell_tool(self):
-        from tools.shell_tool import get_command_sensitivity
         assert get_command_sensitivity("ls") == "safe"
         assert get_command_sensitivity("curl https://x") == "moderate"
         assert get_command_sensitivity("npm install") == "sensitive"
 
     def test_get_tool_sensitivity_from_base_worker(self):
-        from agent.workers.base_worker import get_tool_sensitivity
         assert get_tool_sensitivity("read_file", {}) == "safe"
         assert get_tool_sensitivity("write_file", {}) == "sensitive"
 
 
 class TestPendingPlaceholderId:
     def test_stable_id_for_placeholder(self):
-        """The id must be deterministic so RemoveMessage can target it."""
-        from agent.workers.base_worker import pending_placeholder_id
         assert pending_placeholder_id("tc-123") == "pending-approval-tc-123"
-        # Same input → same output.
         assert pending_placeholder_id("tc-123") == pending_placeholder_id("tc-123")
-        # Different tool-call ids produce different placeholder ids.
         assert pending_placeholder_id("tc-123") != pending_placeholder_id("tc-124")
