@@ -144,20 +144,20 @@ def validate_write_path(path: str) -> Path:
     """
     Validates a path for file writing operations.
 
-    For existing targets, delegates to `validate_path` which enforces both
-    the block-list and the allow-list. For new targets, validates the parent
-    directory (which enforces allow-list transitively) and then re-checks
-    the resolved path against both lists so the allow-list is never skipped.
+    For existing targets, checks existence and enforces both the block-list
+    and the allow-list directly without re-decoding. For new targets, validates
+    the parent directory (which enforces allow-list transitively) and then
+    re-checks the resolved path against both lists so the allow-list is never skipped.
     """
     resolved_path = _resolve_requested_path(path)
 
     if resolved_path.exists():
-        return validate_path(str(resolved_path))
+        _ensure_allowed_path(resolved_path)
+        return resolved_path
 
     parent_dir = resolved_path.parent
-    try:
-        validate_directory_path(str(parent_dir))
-    except FileNotFoundError as err:
-        raise ValueError("Operation Failed: The parent directory does not exist.") from err
+    _ensure_allowed_path(parent_dir)
+    if not parent_dir.is_dir():
+        raise ValueError("Operation Failed: The parent directory does not exist.")
 
     return _ensure_allowed_path(resolved_path)
