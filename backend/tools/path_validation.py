@@ -159,6 +159,8 @@ def validate_write_path(path: str) -> Path:
 
     if resolved_path.exists():
         _ensure_allowed_path(resolved_path)
+        if resolved_path.is_dir():
+            raise ValueError("Operation Failed: The requested path is a directory, not a file.")
         return resolved_path
 
     parent_dir = resolved_path.parent
