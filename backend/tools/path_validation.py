@@ -156,7 +156,7 @@ def validate_directory_path(path: str) -> Path:
     return validated_path
 
 
-def validate_write_path(path: str) -> Path:
+def validate_write_path(path: str, allow_directory: bool = False) -> Path:
     """
     Validates a path for file writing operations.
 
@@ -164,12 +164,16 @@ def validate_write_path(path: str) -> Path:
     and the allow-list directly. For new targets, validates
     the parent directory (which enforces allow-list transitively) and then
     re-checks the resolved path against both lists so the allow-list is never skipped.
+
+    Args:
+        path: The path to validate
+        allow_directory: If True, allow existing directories. If False (default), reject them.
     """
     resolved_path = _resolve_requested_path(path)
 
     if resolved_path.exists():
         _ensure_allowed_path(resolved_path)
-        if resolved_path.is_dir():
+        if resolved_path.is_dir() and not allow_directory:
             raise ValueError("Operation Failed: The requested path is a directory, not a file.")
         return resolved_path
 
