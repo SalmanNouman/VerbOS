@@ -63,7 +63,7 @@ def write_file(path: str, content: str, encoding: str = "utf-8") -> str:
 @tool
 def create_directory(path: str) -> str:
     """Create a new directory."""
-    validated_path = validate_write_path(path)
+    validated_path = validate_write_path(path, allow_directory=True)
     validated_path.mkdir(parents=True, exist_ok=True)
     return f"Successfully created directory: {validated_path}"
 

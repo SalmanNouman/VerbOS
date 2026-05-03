@@ -1,4 +1,6 @@
-from pathlib import Path
+import re
+from pathlib import Path, PureWindowsPath
+from urllib.parse import unquote
 
 SECURITY_CONFIG = {
     "allowed_directories": [
@@ -56,42 +58,82 @@ def _is_blocked(path: Path) -> bool:
     return False
 
 
-def validate_path(requested_path: str) -> Path:
-    """
-    Validates if a path is safe to access and returns the validated absolute path.
-
-    Raises:
-        ValueError: if `requested_path` is empty.
-        FileNotFoundError: if the resolved path does not exist.
-        PermissionError: if the resolved path is blocked or falls outside
-            the configured allow-list (user home + project directory).
-    """
-    if not requested_path:
+def _decode_requested_path(requested_path: str) -> str:
+    if not isinstance(requested_path, str) or requested_path == "":
         raise ValueError("Path cannot be empty")
+    if "\x00" in requested_path:
+        raise ValueError("Path contains invalid characters")
+    if re.search(r"%(?![0-9a-fA-F]{2})", requested_path):
+        raise ValueError("Path contains invalid URL encoding")
+    decoded_path = unquote(requested_path)
+    if "\x00" in decoded_path:
+        raise ValueError("Path contains invalid characters")
+    return decoded_path
 
-    path = Path(requested_path)
+
+def _has_windows_anchor(path: str) -> bool:
+    windows_path = PureWindowsPath(path)
+    return bool(windows_path.drive or path.startswith("\\\\"))
+
+
+def _reject_escape_components(path: Path) -> None:
+    if any(part == ".." for part in path.parts):
+        raise PermissionError("Security Violation: Path traversal is not permitted.")
+
+
+def _resolve_requested_path(requested_path: str) -> Path:
+    decoded_path = _decode_requested_path(requested_path)
+
+    path = Path(decoded_path)
+    _reject_escape_components(path)
+
+    # On POSIX, Windows anchors (drive letters, UNC prefixes) are not recognized
+    # as absolute by ``Path``; the input would otherwise be silently prepended to
+    # ``Path.home()``, mangling the original anchor and bypassing the
+    # post-resolution check below. Detect them on the decoded input before any
+    # path-shape transformation.
+    if _has_windows_anchor(decoded_path) and not path.is_absolute():
+        raise PermissionError("Security Violation: Windows absolute paths are not permitted.")
 
     if not path.is_absolute():
-        path = Path.home() / requested_path
+        path = Path.home() / path
 
-    real_path = path.resolve()
+    resolved_path = path.resolve()
 
-    if not real_path.exists():
-        raise FileNotFoundError(f"File System Error: The path '{real_path}' does not exist.")
+    # On Windows, Windows-style anchors *are* recognized as absolute, so a
+    # legitimate path may still resolve to one. Permit it only when it falls
+    # inside an allowed directory.
+    if _has_windows_anchor(str(resolved_path)):
+        for allowed_dir in _resolved_allowed_directories():
+            if _is_within(resolved_path, allowed_dir):
+                return resolved_path
+        raise PermissionError("Security Violation: Windows absolute paths are not permitted.")
 
+    return resolved_path
+
+
+def _ensure_allowed_path(real_path: Path) -> Path:
     if _is_blocked(real_path):
-        raise PermissionError(
-            f"Security Violation: Access to system directory '{real_path}' is strictly prohibited."
-        )
+        raise PermissionError("Security Violation: Access to system directories is prohibited.")
 
     for allowed_dir in _resolved_allowed_directories():
         if _is_within(real_path, allowed_dir):
             return real_path
 
     raise PermissionError(
-        f"Security Violation: Access to '{real_path}' is denied. "
-        "Operations are restricted to the User Home Directory and the Project Directory."
+        "Security Violation: Access is restricted to the configured workspace."
     )
+
+
+def validate_path(requested_path: str) -> Path:
+    """Validate a readable existing path and return its resolved absolute path."""
+    real_path = _resolve_requested_path(requested_path)
+    real_path = _ensure_allowed_path(real_path)
+
+    if not real_path.exists():
+        raise FileNotFoundError("File System Error: The requested path does not exist.")
+
+    return real_path
 
 
 def validate_read_path(path: str) -> Path:
@@ -99,7 +141,7 @@ def validate_read_path(path: str) -> Path:
     validated_path = validate_path(path)
 
     if validated_path.is_dir():
-        raise ValueError(f"Operation Failed: The path '{validated_path}' is a directory, not a file.")
+        raise ValueError("Operation Failed: The requested path is a directory, not a file.")
 
     return validated_path
 
@@ -109,51 +151,35 @@ def validate_directory_path(path: str) -> Path:
     validated_path = validate_path(path)
 
     if not validated_path.is_dir():
-        raise ValueError(f"Operation Failed: The path '{validated_path}' is not a directory.")
+        raise ValueError("Operation Failed: The requested path is not a directory.")
 
     return validated_path
 
 
-def validate_write_path(path: str) -> Path:
+def validate_write_path(path: str, allow_directory: bool = False) -> Path:
     """
     Validates a path for file writing operations.
 
-    For existing targets, delegates to `validate_path` which enforces both
-    the block-list and the allow-list. For new targets, validates the parent
-    directory (which enforces allow-list transitively) and then re-checks
-    the resolved path against both lists so the allow-list is never skipped.
+    For existing targets, checks existence and enforces both the block-list
+    and the allow-list directly. For new targets, validates
+    the parent directory (which enforces allow-list transitively) and then
+    re-checks the resolved path against both lists so the allow-list is never skipped.
+
+    Args:
+        path: The path to validate
+        allow_directory: If True, allow existing directories. If False (default), reject them.
     """
-    if not path:
-        raise ValueError("Path cannot be empty")
-
-    file_path = Path(path)
-
-    if not file_path.is_absolute():
-        file_path = Path.home() / path
-
-    resolved_path = file_path.resolve()
+    resolved_path = _resolve_requested_path(path)
 
     if resolved_path.exists():
-        return validate_path(str(resolved_path))
+        _ensure_allowed_path(resolved_path)
+        if resolved_path.is_dir() and not allow_directory:
+            raise ValueError("Operation Failed: The requested path is a directory, not a file.")
+        return resolved_path
 
     parent_dir = resolved_path.parent
-    try:
-        validate_directory_path(str(parent_dir))
-    except FileNotFoundError as err:
-        raise ValueError(
-            f"Operation Failed: The parent directory '{parent_dir}' does not exist."
-        ) from err
+    _ensure_allowed_path(parent_dir)
+    if not parent_dir.is_dir():
+        raise ValueError("Operation Failed: The parent directory does not exist.")
 
-    if _is_blocked(resolved_path):
-        raise PermissionError(
-            f"Security Violation: Access to system directory '{resolved_path}' is strictly prohibited."
-        )
-
-    for allowed_dir in _resolved_allowed_directories():
-        if _is_within(resolved_path, allowed_dir):
-            return resolved_path
-
-    raise PermissionError(
-        f"Security Violation: Access to '{resolved_path}' is denied. "
-        "Operations are restricted to the User Home Directory and the Project Directory."
-    )
+    return _ensure_allowed_path(resolved_path)

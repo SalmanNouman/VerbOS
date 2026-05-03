@@ -59,7 +59,7 @@ class ApprovalRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
 
-@app.get("/health", response_model=HealthResponse)
+@app.get("/health")
 async def health_check() -> HealthResponse:
     return HealthResponse(status="ok", version="1.0.0")
 
