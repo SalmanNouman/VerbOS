@@ -87,12 +87,22 @@ def _resolve_requested_path(requested_path: str) -> Path:
     path = Path(decoded_path)
     _reject_escape_components(path)
 
+    # On POSIX, Windows anchors (drive letters, UNC prefixes) are not recognized
+    # as absolute by ``Path``; the input would otherwise be silently prepended to
+    # ``Path.home()``, mangling the original anchor and bypassing the
+    # post-resolution check below. Detect them on the decoded input before any
+    # path-shape transformation.
+    if _has_windows_anchor(decoded_path) and not path.is_absolute():
+        raise PermissionError("Security Violation: Windows absolute paths are not permitted.")
+
     if not path.is_absolute():
         path = Path.home() / path
 
     resolved_path = path.resolve()
 
-    # Reject Windows absolute/UNC paths only if they're not in allowed directories
+    # On Windows, Windows-style anchors *are* recognized as absolute, so a
+    # legitimate path may still resolve to one. Permit it only when it falls
+    # inside an allowed directory.
     if _has_windows_anchor(str(resolved_path)):
         for allowed_dir in _resolved_allowed_directories():
             if _is_within(resolved_path, allowed_dir):
