@@ -84,6 +84,82 @@ class BaseWorker(ABC):
     def get_description(self) -> str:
         return self.description
 
+    def _find_tool(self, tool_name: str) -> BaseTool | None:
+        return next((tool for tool in self.tools if tool.name == tool_name), None)
+
+    def _tool_error_message(self, tool_id: str, content: str) -> ToolMessage:
+        return ToolMessage(tool_call_id=tool_id, content=content)
+
+    async def _execute_tool_call(self, tool_id: str, tool_name: str, tool_args: dict) -> ToolMessage:
+        tool = self._find_tool(tool_name)
+
+        if not tool:
+            error_msg = f"Error: Tool {tool_name} not found"
+            logger.error(error_msg)
+            return self._tool_error_message(tool_id, error_msg)
+
+        try:
+            result = await tool.ainvoke(tool_args)
+            logger.debug(f"Tool {tool_name} returned result")
+            return ToolMessage(
+                tool_call_id=tool_id,
+                content=str(result) if not isinstance(result, str) else result,
+            )
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"Tool {tool_name} failed: {error_msg}")
+            return self._tool_error_message(tool_id, f"Error: {error_msg}")
+
+    def _pending_action_for_tool_call(
+        self,
+        tool_id: str,
+        tool_name: str,
+        tool_args: dict,
+        sensitivity: SensitivityLevel,
+    ) -> PendingAction:
+        return PendingAction(
+            id=tool_id,
+            worker_name=self.name,
+            tool_name=tool_name,
+            tool_args=tool_args,
+            sensitivity=sensitivity,
+            description=self._describe_action(tool_name, tool_args),
+        )
+
+    def _pending_approval_message(self, tool_id: str) -> ToolMessage:
+        return ToolMessage(
+            id=pending_placeholder_id(tool_id),
+            tool_call_id=tool_id,
+            content="[Awaiting user approval]",
+        )
+
+    async def _process_tool_calls(
+        self,
+        tool_calls: list[dict],
+        result_messages: list[BaseMessage],
+    ) -> PendingAction | None:
+        for tool_call in tool_calls:
+            logger.info(f"Worker {self.name} calling tool: {tool_call['name']}")
+
+            tool_id = tool_call.get("id") or str(uuid.uuid4())
+            tool_name = tool_call["name"]
+            tool_args = tool_call.get("args", {})
+            sensitivity = classify_tool(tool_name, tool_args)
+
+            if sensitivity == "sensitive":
+                logger.info(f"Sensitive action detected for {tool_name}, awaiting approval")
+                result_messages.append(self._pending_approval_message(tool_id))
+                return self._pending_action_for_tool_call(
+                    tool_id,
+                    tool_name,
+                    tool_args,
+                    sensitivity,
+                )
+
+            result_messages.append(await self._execute_tool_call(tool_id, tool_name, tool_args))
+
+        return None
+
     async def process(self, state: GraphState) -> WorkerResult:
         """Process the current state and return updated messages."""
         messages = [
@@ -97,62 +173,10 @@ class BaseWorker(ABC):
             result_messages: list[BaseMessage] = [response]
 
             if hasattr(response, "tool_calls") and response.tool_calls:
-                pending_action: PendingAction | None = None
-
-                for tool_call in response.tool_calls:
-                    logger.info(f"Worker {self.name} calling tool: {tool_call['name']}")
-
-                    tool_id = tool_call.get("id") or str(uuid.uuid4())
-                    tool_name = tool_call["name"]
-                    tool_args = tool_call.get("args", {})
-
-                    tool = next((t for t in self.tools if t.name == tool_name), None)
-
-                    if not tool:
-                        error_msg = f"Error: Tool {tool_name} not found"
-                        logger.error(error_msg)
-                        result_messages.append(ToolMessage(
-                            tool_call_id=tool_id,
-                            content=error_msg,
-                        ))
-                        continue
-
-                    sensitivity = classify_tool(tool_name, tool_args)
-
-                    if sensitivity == "sensitive":
-                        logger.info(f"Sensitive action detected for {tool_name}, awaiting approval")
-                        pending_action = PendingAction(
-                            id=tool_id,
-                            worker_name=self.name,
-                            tool_name=tool_name,
-                            tool_args=tool_args,
-                            sensitivity=sensitivity,
-                            description=self._describe_action(tool_name, tool_args),
-                        )
-                        result_messages.append(ToolMessage(
-                            id=pending_placeholder_id(tool_id),
-                            tool_call_id=tool_id,
-                            content="[Awaiting user approval]",
-                        ))
-                        # Stop processing more tools - handle one sensitive action at a time
-                        # After approval, the worker will be called again to continue
-                        break
-
-                    try:
-                        result = await tool.ainvoke(tool_args)
-                        logger.debug(f"Tool {tool_name} returned result")
-                        result_messages.append(ToolMessage(
-                            tool_call_id=tool_id,
-                            content=str(result) if not isinstance(result, str) else result,
-                        ))
-                    except Exception as e:
-                        error_msg = str(e)
-                        logger.error(f"Tool {tool_name} failed: {error_msg}")
-                        result_messages.append(ToolMessage(
-                            tool_call_id=tool_id,
-                            content=f"Error: {error_msg}",
-                        ))
-
+                pending_action = await self._process_tool_calls(
+                    response.tool_calls,
+                    result_messages,
+                )
                 if pending_action:
                     return WorkerResult(
                         messages=result_messages,
@@ -184,25 +208,13 @@ class BaseWorker(ABC):
     async def execute_pending_action(self, action: PendingAction) -> list[BaseMessage]:
         """Execute a pending action after user approval."""
         logger.info(f"Executing pending action: {action.tool_name} for worker {self.name}")
-        tool = next((t for t in self.tools if t.name == action.tool_name), None)
-
-        if not tool:
-            return [ToolMessage(
-                tool_call_id=action.id,
-                content=f"Error: Tool {action.tool_name} not found",
-            )]
-
-        try:
-            result = await tool.ainvoke(action.tool_args)
-            return [ToolMessage(
-                tool_call_id=action.id,
-                content=str(result) if not isinstance(result, str) else result,
-            )]
-        except Exception as e:
-            return [ToolMessage(
-                tool_call_id=action.id,
-                content=f"Error: {str(e)}",
-            )]
+        return [
+            await self._execute_tool_call(
+                action.id,
+                action.tool_name,
+                action.tool_args,
+            )
+        ]
 
     def _generate_task_summary(self, messages: list[BaseMessage]) -> str:
         """Generate a concise summary of tool executions for supervisor context."""
