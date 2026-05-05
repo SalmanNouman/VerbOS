@@ -17,6 +17,9 @@ import {
 } from 'lucide-react';
 import type { AgentEvent, PendingAction } from '../types/verbos';
 
+type ToolEvent = Extract<AgentEvent, { type: 'tool' }>;
+type ToolEventTool = ToolEvent['tools'][number];
+
 export type TraceStepKind =
   | 'turn'
   | 'supervisor'
@@ -34,6 +37,8 @@ export type TraceStepStatus =
   | 'approved'
   | 'denied';
 
+type TraceSensitivity = 'safe' | 'moderate' | 'sensitive';
+
 export interface TraceStep {
   id: string;
   kind: TraceStepKind;
@@ -45,20 +50,46 @@ export interface TraceStep {
   toolArgs?: unknown;
   toolResult?: string;
   next?: string;
-  sensitivity?: 'safe' | 'moderate' | 'sensitive';
+  sensitivity?: TraceSensitivity;
   status?: TraceStepStatus;
 }
 
 interface AgentTraceProps {
-  trace: TraceStep[];
-  isOpen: boolean;
-  onToggle: () => void;
-  isRunning: boolean;
-  onClear?: () => void;
+  readonly trace: TraceStep[];
+  readonly isOpen: boolean;
+  readonly onToggle: () => void;
+  readonly isRunning: boolean;
+  readonly onClear?: () => void;
+}
+
+interface TraceStepCardProps {
+  readonly step: TraceStep;
+}
+
+interface ToolResultPreviewProps {
+  readonly result: string;
+}
+
+interface NewTraceStepInput {
+  kind: TraceStepKind;
+  label: string;
+  detail?: string;
+  workerName?: string;
+  toolName?: string;
+  toolArgs?: unknown;
+  toolResult?: string;
+  next?: string;
+  sensitivity?: TraceSensitivity;
+  status?: TraceStepStatus;
 }
 
 const ROUTING_PATTERN = /^Routing to (.+?)\.\.\.$/;
 const NEXT_PATTERN = /^Next: (.+)$/;
+const SENSITIVITY_BADGE_CLASSES: Record<TraceSensitivity, string> = {
+  sensitive: 'bg-red-500/10 text-red-400',
+  moderate: 'bg-amber-500/10 text-amber-400',
+  safe: 'bg-emerald-500/10 text-emerald-400',
+};
 
 // Monotonic counter for generating unique trace-step ids. These ids are only
 // used as React keys and for targeted updates — no security or entropy
@@ -68,6 +99,108 @@ let _stepCounter = 0;
 const nextStepId = (prefix: string = 'step') =>
   `${prefix}-${++_stepCounter}`;
 
+function newTraceStep(input: NewTraceStepInput): TraceStep {
+  return {
+    id: nextStepId(),
+    timestamp: Date.now(),
+    ...input,
+  };
+}
+
+function pendingWorkerStep(label: string): TraceStep {
+  return newTraceStep({
+    kind: 'worker',
+    label,
+    workerName: label,
+    status: 'pending',
+  });
+}
+
+function supervisorStep(next: string): TraceStep {
+  return newTraceStep({
+    kind: 'supervisor',
+    label: 'Supervisor',
+    next,
+    status: 'ok',
+  });
+}
+
+function initialStep(detail: string): TraceStep {
+  return newTraceStep({
+    kind: 'supervisor',
+    label: 'Initial',
+    detail,
+    status: 'pending',
+  });
+}
+
+function toolStep(tool: ToolEventTool): TraceStep {
+  return newTraceStep({
+    kind: 'tool',
+    label: tool.name,
+    toolName: tool.name,
+    toolArgs: tool.args,
+    status: 'pending',
+  });
+}
+
+function approvalStep(action: PendingAction): TraceStep {
+  return newTraceStep({
+    kind: 'approval',
+    label: action.toolName,
+    workerName: action.workerName,
+    toolName: action.toolName,
+    toolArgs: action.toolArgs,
+    sensitivity: action.sensitivity,
+    detail: action.description,
+    status: 'awaiting_approval',
+  });
+}
+
+function resultStep(kind: 'response' | 'error', detail: string): TraceStep {
+  return newTraceStep({
+    kind,
+    label: kind === 'response' ? 'Response' : 'Error',
+    detail,
+    status: kind === 'response' ? 'ok' : 'error',
+  });
+}
+
+function hasInitialStatus(prev: TraceStep[], detail: string): boolean {
+  return prev.some(step => step.kind === 'supervisor' && step.label === 'Initial' && step.detail === detail);
+}
+
+function appendStatusStep(prev: TraceStep[], message: string): TraceStep[] {
+  const routingMatch = ROUTING_PATTERN.exec(message);
+  if (routingMatch) {
+    return [...prev, pendingWorkerStep(routingMatch[1])];
+  }
+
+  const nextMatch = NEXT_PATTERN.exec(message);
+  if (nextMatch) {
+    return [...prev, supervisorStep(nextMatch[1])];
+  }
+
+  const lastStep = prev[prev.length - 1];
+  const isDuplicate = !message || hasInitialStatus(prev, message) || (lastStep?.kind === 'supervisor' && lastStep.detail === message);
+  return isDuplicate ? prev : [...prev, initialStep(message)];
+}
+
+function appendToolResult(prev: TraceStep[], message: string): TraceStep[] {
+  const updated = [...prev];
+  const pendingIndex = updated.findIndex(step => step.kind === 'tool' && step.status === 'pending' && !step.toolResult);
+  if (pendingIndex === -1) {
+    return prev;
+  }
+
+  updated[pendingIndex] = { ...updated[pendingIndex], status: 'ok', toolResult: message };
+  return updated;
+}
+
+function finalizePending(prev: TraceStep[], status: 'ok' | 'error'): TraceStep[] {
+  return prev.map(step => step.status === 'pending' ? { ...step, status } : step);
+}
+
 /**
  * Translate an `AgentEvent` into zero-or-more trace-step mutations.
  *
@@ -76,150 +209,28 @@ const nextStepId = (prefix: string = 'step') =>
  * works with the existing SSE contract — no backend changes required.
  */
 export function reduceTrace(prev: TraceStep[], event: AgentEvent): TraceStep[] {
-  const now = Date.now();
-  const nextId = () => nextStepId();
-
   switch (event.type) {
-    case 'status': {
-      const msg = event.message ?? '';
-
-      const routingMatch = msg.match(ROUTING_PATTERN);
-      if (routingMatch) {
-        const workerLabel = routingMatch[1];
-        return [
-          ...prev,
-          {
-            id: nextId(),
-            kind: 'worker',
-            timestamp: now,
-            label: workerLabel,
-            workerName: workerLabel,
-            status: 'pending',
-          },
-        ];
-      }
-
-      const nextMatch = msg.match(NEXT_PATTERN);
-      if (nextMatch) {
-        return [
-          ...prev,
-          {
-            id: nextId(),
-            kind: 'supervisor',
-            timestamp: now,
-            label: 'Supervisor',
-            next: nextMatch[1],
-            status: 'ok',
-          },
-        ];
-      }
-
-      // Plain "Processing...", "Thinking..." etc — only add once per turn so
-      // we don't spam the trace with duplicate initial status messages.
-      if (msg && !prev.some(s => s.kind === 'supervisor' && s.label === 'Initial' && s.detail === msg)) {
-        const lastStep = prev[prev.length - 1];
-        if (!lastStep || lastStep.kind !== 'supervisor' || lastStep.detail !== msg) {
-          return [
-            ...prev,
-            {
-              id: nextId(),
-              kind: 'supervisor',
-              timestamp: now,
-              label: 'Initial',
-              detail: msg,
-              status: 'pending',
-            },
-          ];
-        }
-      }
-      return prev;
-    }
+    case 'status':
+      return appendStatusStep(prev, event.message ?? '');
 
     case 'tool': {
-      const newSteps: TraceStep[] = (event.tools ?? []).map(t => ({
-        id: nextId(),
-        kind: 'tool',
-        timestamp: now,
-        label: t.name,
-        toolName: t.name,
-        toolArgs: t.args,
-        status: 'pending',
-      }));
-
-      // Mark the most recent worker step as "executing" (status: ok isn't right,
-      // leave pending until response). No-op here — worker remains pending.
+      const newSteps: TraceStep[] = (event.tools ?? []).map(toolStep);
       return [...prev, ...newSteps];
     }
 
-    case 'tool_result': {
-      // Attach the result to the oldest pending tool step. `tool` events emit
-      // tools in dispatch order and `tool_result` events arrive in the same
-      // order, so matching oldest-first pairs each result with its own tool.
-      // A backward scan would mis-assign results when multiple tools are
-      // dispatched in one event (A, B, C → results for A get attached to C).
-      const updated = [...prev];
-      for (let i = 0; i < updated.length; i++) {
-        const step = updated[i];
-        if (step.kind === 'tool' && step.status === 'pending' && !step.toolResult) {
-          updated[i] = { ...step, status: 'ok', toolResult: event.message };
-          return updated;
-        }
-      }
-      return prev;
-    }
+    case 'tool_result':
+      return appendToolResult(prev, event.message);
 
     case 'approval_required': {
-      const action = event.action as PendingAction;
-      return [
-        ...prev,
-        {
-          id: nextId(),
-          kind: 'approval',
-          timestamp: now,
-          label: action.toolName,
-          workerName: action.workerName,
-          toolName: action.toolName,
-          toolArgs: action.toolArgs,
-          sensitivity: action.sensitivity,
-          detail: action.description,
-          status: 'awaiting_approval',
-        },
-      ];
+      return [...prev, approvalStep(event.action)];
     }
 
     case 'response': {
-      // Mark any trailing pending worker/supervisor steps as complete.
-      const finalized = prev.map(step =>
-        step.status === 'pending' ? { ...step, status: 'ok' as const } : step
-      );
-      return [
-        ...finalized,
-        {
-          id: nextId(),
-          kind: 'response',
-          timestamp: now,
-          label: 'Response',
-          detail: event.message,
-          status: 'ok',
-        },
-      ];
+      return [...finalizePending(prev, 'ok'), resultStep('response', event.message)];
     }
 
     case 'error': {
-      const finalized = prev.map(step =>
-        step.status === 'pending' ? { ...step, status: 'error' as const } : step
-      );
-      return [
-        ...finalized,
-        {
-          id: nextId(),
-          kind: 'error',
-          timestamp: now,
-          label: 'Error',
-          detail: event.message,
-          status: 'error',
-        },
-      ];
+      return [...finalizePending(prev, 'error'), resultStep('error', event.message)];
     }
 
     case 'done':
@@ -325,7 +336,32 @@ function statusBadge(status?: TraceStepStatus) {
   }
 }
 
-function TraceStepCard({ step }: { step: TraceStep }) {
+function sensitivityBadge(sensitivity?: TraceStep['sensitivity']) {
+  if (!sensitivity) return null;
+
+  return (
+    <span className={`text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded ${SENSITIVITY_BADGE_CLASSES[sensitivity]}`}>
+      {sensitivity}
+    </span>
+  );
+}
+
+function truncateToolResult(result: string): string {
+  return result.length > 600 ? `${result.slice(0, 600)}\n... [truncated]` : result;
+}
+
+function ToolResultPreview({ result }: ToolResultPreviewProps) {
+  return (
+    <div>
+      <div className="text-[9px] text-emerald-400/80 mb-0.5 uppercase tracking-wider">Result</div>
+      <pre className="bg-background/60 border border-border/30 rounded p-2 text-[10px] text-text-secondary whitespace-pre-wrap overflow-x-auto max-h-40">
+        {truncateToolResult(result)}
+      </pre>
+    </div>
+  );
+}
+
+function TraceStepCard({ step }: TraceStepCardProps) {
   const [expanded, setExpanded] = useState(false);
   const hasExpandable = Boolean(step.detail || step.toolArgs || step.toolResult);
 
@@ -347,19 +383,7 @@ function TraceStepCard({ step }: { step: TraceStep }) {
                 <span className="text-[10px] text-text-muted font-mono">{step.next}</span>
               </>
             )}
-            {step.sensitivity && (
-              <span
-                className={`text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded ${
-                  step.sensitivity === 'sensitive'
-                    ? 'bg-red-500/10 text-red-400'
-                    : step.sensitivity === 'moderate'
-                    ? 'bg-amber-500/10 text-amber-400'
-                    : 'bg-emerald-500/10 text-emerald-400'
-                }`}
-              >
-                {step.sensitivity}
-              </span>
-            )}
+            {sensitivityBadge(step.sensitivity)}
             {statusBadge(step.status)}
           </div>
 
@@ -388,16 +412,7 @@ function TraceStepCard({ step }: { step: TraceStep }) {
                   </pre>
                 </div>
               )}
-              {step.toolResult && (
-                <div>
-                  <div className="text-[9px] text-emerald-400/80 mb-0.5 uppercase tracking-wider">Result</div>
-                  <pre className="bg-background/60 border border-border/30 rounded p-2 text-[10px] text-text-secondary whitespace-pre-wrap overflow-x-auto max-h-40">
-                    {step.toolResult.length > 600
-                      ? step.toolResult.slice(0, 600) + '\n... [truncated]'
-                      : step.toolResult}
-                  </pre>
-                </div>
-              )}
+              {step.toolResult && <ToolResultPreview result={step.toolResult} />}
             </div>
           )}
         </div>
